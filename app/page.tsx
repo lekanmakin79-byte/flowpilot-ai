@@ -11,6 +11,7 @@ import Comparison from "@/components/landing/Comparison";
 import FAQ from "@/components/landing/FAQ";
 import Pricing from "@/components/landing/Pricing";
 import BackToTop from "@/components/landing/BackToTop";
+import { Analytics } from "@vercel/analytics/next"
 
 
 export default function Home(){
@@ -18,7 +19,7 @@ export default function Home(){
 return (
 <main>
 
-<Navbar/>
+ <Navbar/>
 
 <Hero/>
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-
+import Image from "next/image";
 
 export default function Navbar(){
 
@@ -14,19 +14,27 @@ return (
 flex 
 items-center 
 justify-between 
-px-8 
-py-6 
-max-w-7xl 
+px-8
+py-6
+max-w-7x1
 mx-auto
 ">
 
 
 {/* Logo */}
 
-<div className="text-2xl font-bold text-slate-900">
-✦ FlowPilot AI
-</div>
+<Image
+  src="/logo.png"
+  alt="FlowPilot AI"
+  width={42}
+  height={42}
+/>
 
+<div className="text-2xl font-bold text-slate-900">
+
+✦ FlowPilot AI
+
+</div>
 
 
 {/* Desktop Menu */}

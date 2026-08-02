@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 
 export default function Footer() {
   return (
@@ -7,11 +8,19 @@ export default function Footer() {
       <div className="max-w-7xl mx-auto px-6 py-16">
 
         <div className="grid md:grid-cols-4 gap-10">
+		
+				 
+  <Image
+  src="/logo.png"
+  alt="FlowPilot AI"
+  width={42}
+  height={42}
+/>
 
           <div>
 
             <h2 className="text-2xl font-bold mb-4">
-              FlowPilot AI
+              <span>FlowPilot AI</span>
             </h2>
 
             <p className="text-slate-400 leading-7">
