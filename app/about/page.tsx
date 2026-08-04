@@ -1,5 +1,11 @@
+import PageHeader from "@/components/layout/PageHeader";
+import PageFooter from "@/components/layout/PageFooter";
 export default function AboutPage() {
 	return ( 
+	
+	<>
+      <PageHeader />
+	  
 	<main className="min-h-screen bg-white text-slate-900"> 
 	<section className="bg-slate-950 text-white py-24 px-8"> 
 	<div className="max-w-4xl mx-auto text-center"> 
@@ -67,5 +73,12 @@ export default function AboutPage() {
 	bg-green-600 hover:bg-green-700 text-white px-8 py-4 rounded-2xl 
 	font-semibold text-lg transition-colors shadow-lg shadow-green-600/20" >
 	Get Free Early Access </a> <p className="text-sm text-slate-500 mt-4"> 
-	No credit card required • Free for early adopters </p> </div> </section> 
-	</main> ); }
+	No credit card required • Free for early adopters </p> </div> </section>
+
+	
+	</main> 
+	
+	<PageFooter />
+    </>
+	
+	); }

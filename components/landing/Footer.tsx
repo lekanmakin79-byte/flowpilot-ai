@@ -10,12 +10,15 @@ export default function Footer() {
         <div className="grid md:grid-cols-4 gap-10">
 		
 				 
+ 
   <Image
-  src="/logo.png"
-  alt="FlowPilot AI"
-  width={42}
-  height={42}
-/>
+    src="/logo.png"
+    width={200}
+    height={200}
+    alt="FlowPilot AI"
+    className="h-auto w-[200px]"
+  />
+
 
           <div>
 

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 
 export default function Navbar(){
 
@@ -23,12 +24,14 @@ mx-auto
 
 {/* Logo */}
 
+
 <Image
-  src="/logo.png"
-  alt="FlowPilot AI"
-  width={42}
-  height={42}
-/>
+    src="/logo.png"
+    width={100}
+    height={100}
+    alt="FlowPilot AI"
+    className="h-auto w-[100px]"
+  />
 
 <div className="text-2xl font-bold text-slate-900">
 
