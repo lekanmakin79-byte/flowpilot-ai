@@ -80,11 +80,38 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+	const structuredData = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "FlowPilot AI",
+  applicationCategory: "BusinessApplication",
+  operatingSystem: "Web Browser",
+  description:
+    "AI Office Manager for small businesses. Manage customers, quotes, jobs and invoices with AI.",
+  url: "https://flowpilot-ai-orcin.vercel.app",
+  image: "https://flowpilot-ai-orcin.vercel.app/og-image.png",
+  offers: {
+    "@type": "Offer",
+    price: "0",
+    priceCurrency: "GBP",
+  },
+  creator: {
+    "@type": "Organization",
+    name: "FlowPilot AI",
+  },
+};
 
   return (
     <html lang="en">
 
      <body>
+	 
+	 <script
+  type="application/ld+json"
+  dangerouslySetInnerHTML={{
+    __html: JSON.stringify(structuredData),
+  }}
+/>
 
 {children}
 

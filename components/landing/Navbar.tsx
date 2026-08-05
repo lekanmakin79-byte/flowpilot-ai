@@ -12,19 +12,21 @@ export default function Navbar() {
       <div className="flex items-center justify-between max-w-7xl mx-auto px-8 py-5">
 
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-3">
-          <Image
-            src="/logo.png"
-            width={50}
-            height={50}
-            alt="FlowPilot AI"
-            className="h-auto"
-          />
+        <Image
+    src="/logo.png"
+    width={150}
+    height={150}
+    alt="FlowPilot AI"
+    className="h-auto w-[150px]"
+  />
+  
+   <div>
 
-          <span className="text-2xl font-bold text-slate-900">
-            ✦ FlowPilot AI
-          </span>
-        </Link>
+            <h2 className="text-2xl font-bold mb-4">
+              <span>✦ FlowPilot AI</span>
+            </h2>
+
+          </div>
 
         {/* Desktop Menu */}
         <div className="hidden md:flex items-center gap-8 text-slate-600">
