@@ -19,17 +19,18 @@ export default function Hero() {
 
           <h1 className="text-5xl md:text-6xl font-bold text-slate-900 leading-tight">
 
-            The AI Office Manager
+            Spend Less Time on Admin.
             <br />
-            for Small Businesses
+            Win More Business.
 
           </h1>
 
 
           <p className="mt-6 text-xl text-slate-600 max-w-xl">
 
-            Spend less time on admin and more time growing your business.
-            FlowPilot AI helps manage quotes, invoices, customers and daily tasks.
+            FlowPilot AI helps service businesses create professional quotes, 
+			organise customers, manage jobs and automate everyday office work—so 
+			you can focus on growing your business.
 
           </p>
 
@@ -69,6 +70,24 @@ Learn More
 
 
         </motion.div>
+		
+		<div className="mt-8 text-center">
+
+  <p className="font-semibold text-slate-700">
+    🛠️ Built for service businesses
+  </p>
+
+  <div className="mt-4 flex flex-wrap justify-center gap-6 text-sm text-slate-600">
+
+    <span>✅ Free Early Access</span>
+
+    <span>🔒 No credit card required</span>
+
+    <span>⚡ Join in under 30 seconds</span>
+
+  </div>
+
+</div>
 
 
 
@@ -108,7 +127,7 @@ Learn More
 
 
           <p className="mt-6 text-slate-700 font-semibold">
-            Good morning, David 👋
+            Good morning 👋
           </p>
 
 
@@ -135,7 +154,7 @@ Learn More
 
 
             <DashboardCard
-              title="Revenue"
+              title="Monthly Revenue"
               value="£8,450"
             />
 

@@ -11,7 +11,11 @@ import Comparison from "@/components/landing/Comparison";
 import FAQ from "@/components/landing/FAQ";
 import Pricing from "@/components/landing/Pricing";
 import BackToTop from "@/components/landing/BackToTop";
-import { Analytics } from "@vercel/analytics/next"
+import { Analytics } from "@vercel/analytics/next";
+import WhyChoose from "@/components/landing/WhyChoose";
+import FoundingMembers from "@/components/landing/FoundingMembers";
+import WhoWeServe from "@/components/landing/WhoWeServe";
+import TrustBar from "@/components/landing/TrustBar";
 
 
 export default function Home(){
@@ -23,8 +27,6 @@ return (
 
 <Hero/>
 
-<Industries/>
-
 <Problems/>
 
 <Solution/>
@@ -35,11 +37,17 @@ return (
 
 <Features/>
 
-<Pricing/>
+<WhyChoose />
+
+<WhoWeServe />
+
+<FoundingMembers />
 
 <FAQ/>
 
 <Waitlist/>
+
+<TrustBar />
 
 <Footer/>
 
