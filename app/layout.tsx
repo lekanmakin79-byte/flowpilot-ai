@@ -17,7 +17,7 @@ export const metadata: Metadata = {
     "FlowPilot AI helps electricians, plumbers, builders, cleaning companies, property services and other small businesses manage quotes, customers, jobs and invoices with AI.",
 
 verification: {
-    google: "ULRHqhMw_NJN_qgQ39FT77fzv0vefBdyaOrgETP4JSU" ,
+    google: "ULRHqhMw_NJN_qgQ39FT77fzv0vefBdyaOrgETP4JSU",
   },
 
   keywords: [

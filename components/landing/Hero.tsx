@@ -37,33 +37,34 @@ export default function Hero() {
 
           <div className="flex gap-4 mt-8">
 
-            <a
-href="#waitlist"
-className="
-bg-green-500
-hover:bg-green-600
-text-white
-px-7
-py-4
-rounded-xl
-font-semibold
-"
+           <a
+  href="/signup"
+  className="
+  bg-green-500
+  hover:bg-green-600
+  text-white
+  px-7
+  py-4
+  rounded-xl
+  font-semibold
+  transition
+  "
 >
-Join Early Access
+  Start Free
 </a>
 
 <a
-href="#solution"
-className="
-border
-border-slate-300
-px-7
-py-4
-rounded-xl
-font-semibold
-"
+  href="#solution"
+  className="
+    border
+    border-slate-300
+    px-7
+    py-4
+    rounded-xl
+    font-semibold
+  "
 >
-Learn More
+  Learn More
 </a>
 
           </div>

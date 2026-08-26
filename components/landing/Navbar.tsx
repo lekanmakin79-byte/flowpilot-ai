@@ -57,12 +57,21 @@ export default function Navbar() {
         </div>
 
         {/* Desktop CTA */}
-        <a
-          href="/#waitlist"
-          className="hidden md:block rounded-xl bg-green-500 px-5 py-3 font-semibold text-white hover:bg-green-600"
-        >
-          Join Early Access
-        </a>
+        <div className="hidden md:flex items-center gap-3">
+  <Link
+    href="/login"
+    className="rounded-xl border border-slate-300 px-5 py-3 font-semibold text-slate-700 hover:bg-slate-50"
+  >
+    Log In
+  </Link>
+
+  <Link
+    href="/signup"
+    className="rounded-xl bg-green-500 px-5 py-3 font-semibold text-white hover:bg-green-600"
+  >
+    Start Free
+  </Link>
+</div>
 
         {/* Mobile Hamburger */}
         <button
@@ -142,14 +151,13 @@ export default function Navbar() {
             >
               📄 Terms of Service
             </Link>
-
-            <a
-              href="/#waitlist"
-              onClick={() => setOpen(false)}
-              className="m-4 rounded-xl bg-green-500 py-3 text-center font-semibold text-white"
-            >
-              Join Early Access
-            </a>
+<Link
+  href="/signup"
+  onClick={() => setOpen(false)}
+  className="m-4 rounded-xl bg-green-500 py-3 text-center font-semibold text-white"
+>
+  Start Free
+</Link>
           </div>
         </div>
       )}
