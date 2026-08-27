@@ -5,31 +5,6 @@ import {
   type Feature,
 } from "@/lib/subscription-access";
 
-function getSupabaseServer() {
-  const url =
-    process.env.NEXT_PUBLIC_SUPABASE_URL;
-
-  const anonKey =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !anonKey) {
-    throw new Error(
-      "Supabase configuration is missing."
-    );
-  }
-
-  return createClient(
-    url,
-    anonKey,
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    }
-  );
-}
-
 export async function POST(
   request: Request
 ) {
@@ -45,22 +20,19 @@ export async function POST(
         | string
         | undefined;
 
-    const validFeatures: Feature[] =
-      [
-        "ai_follow_up",
-        "ai_assistant",
-        "customer",
-        "lead",
-        "job",
-        "quote",
-        "invoice",
-      ];
+    const validFeatures: Feature[] = [
+      "ai_follow_up",
+      "ai_assistant",
+      "customer",
+      "lead",
+      "job",
+      "quote",
+      "invoice",
+    ];
 
     if (
       !feature ||
-      !validFeatures.includes(
-        feature
-      )
+      !validFeatures.includes(feature)
     ) {
       return NextResponse.json(
         {
@@ -73,21 +45,14 @@ export async function POST(
       );
     }
 
-    const supabase =
-      getSupabaseServer();
+    /*
+     * Read the user's Supabase access token
+     * from the Authorization header.
+     */
+    const authorization =
+      request.headers.get("authorization");
 
-    const {
-      data: {
-        user,
-      },
-      error: userError,
-    } =
-      await supabase.auth.getUser();
-
-    if (
-      userError ||
-      !user
-    ) {
+    if (!authorization) {
       return NextResponse.json(
         {
           allowed: false,
@@ -99,11 +64,95 @@ export async function POST(
       );
     }
 
+    const accessToken =
+      authorization.replace(
+        /^Bearer\s+/i,
+        ""
+      ).trim();
+
+    if (!accessToken) {
+      return NextResponse.json(
+        {
+          allowed: false,
+          code: "UNAUTHENTICATED",
+          error:
+            "You must be signed in to continue.",
+        },
+        { status: 401 }
+      );
+    }
+
+    /*
+     * Use the Supabase service-role client only
+     * on the server to validate the user's token.
+     */
+    const url =
+      process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+    const serviceRoleKey =
+      process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!url || !serviceRoleKey) {
+      throw new Error(
+        "Supabase server configuration is missing."
+      );
+    }
+
+    const supabase =
+      createClient(
+        url,
+        serviceRoleKey,
+        {
+          auth: {
+            autoRefreshToken: false,
+            persistSession: false,
+          },
+        }
+      );
+
+    /*
+     * Explicitly validate the access token.
+     */
+    const {
+      data: {
+        user,
+      },
+      error: userError,
+    } =
+      await supabase.auth.getUser(
+        accessToken
+      );
+
+    if (
+      userError ||
+      !user
+    ) {
+      console.error(
+        "Subscription authentication error:",
+        userError
+      );
+
+      return NextResponse.json(
+        {
+          allowed: false,
+          code: "UNAUTHENTICATED",
+          error:
+            "Your session has expired. Please sign in again.",
+        },
+        { status: 401 }
+      );
+    }
+
+    /*
+     * Check the requested subscription feature.
+     */
     const access =
       await checkFeatureAccess(
         user.id,
         feature,
-        { businessId }
+        {
+          businessId,
+        }
       );
 
     return NextResponse.json(
@@ -118,7 +167,8 @@ export async function POST(
     return NextResponse.json(
       {
         allowed: false,
-        code: "SUBSCRIPTION_CHECK_ERROR",
+        code:
+          "SUBSCRIPTION_CHECK_ERROR",
         error:
           error instanceof Error
             ? error.message

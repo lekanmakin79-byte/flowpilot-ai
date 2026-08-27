@@ -27,6 +27,9 @@ export default function CustomersPage() {
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState("");
+  
+  const [canAddCustomer, setCanAddCustomer] = useState(true);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -89,7 +92,57 @@ export default function CustomersPage() {
     }
 
     setCustomers(data ?? []);
-    setLoading(false);
+
+const { data: sessionData } =
+  await supabase.auth.getSession();
+
+const accessToken =
+  sessionData.session?.access_token;
+
+if (!accessToken) {
+  setCanAddCustomer(false);
+  setSubscriptionLoading(false);
+  setLoading(false);
+  return;
+}
+
+const subscriptionResponse =
+  await fetch("/api/subscription/check", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      feature: "customer",
+      businessId: business.id,
+    }),
+  });
+
+const access =
+  await subscriptionResponse.json();
+
+if (
+  subscriptionResponse.ok &&
+  access.allowed
+) {
+  setCanAddCustomer(true);
+} else {
+  setCanAddCustomer(false);
+
+  if (
+    access.code ===
+    "FREE_LIMIT_REACHED"
+  ) {
+    setError(
+      access.error ||
+        "You have reached the Free plan limit of 5 customers. Upgrade to Professional to add unlimited customers."
+    );
+  }
+}
+
+setSubscriptionLoading(false);
+setLoading(false);
   }
 
   function resetForm() {
@@ -105,6 +158,13 @@ export default function CustomersPage() {
 
   async function handleAddCustomer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+	
+	if (!canAddCustomer) {
+  setError(
+    "You have reached the Free plan limit of 5 customers. Upgrade to Professional to add unlimited customers."
+  );
+  return;
+}
 
     if (!businessId) {
       setError("Business information is missing.");
@@ -129,18 +189,17 @@ export default function CustomersPage() {
     }
 
     // ----------------------------------------
-    // CHECK SUBSCRIPTION ACCESS
-    // ----------------------------------------
+// CHECK SUBSCRIPTION ACCESS
+// ----------------------------------------
 
-   const {
+const {
   data: { session },
 } = await supabase.auth.getSession();
 
 if (!session?.access_token) {
-  setError(
-    "Your session has expired. Please log in again."
-  );
+  setError("Your session has expired. Please sign in again.");
   setSaving(false);
+  router.replace("/login");
   return;
 }
 
@@ -153,22 +212,20 @@ const subscriptionResponse = await fetch(
       Authorization: `Bearer ${session.access_token}`,
     },
     body: JSON.stringify({
-      resource: "customer",
+      feature: "customer",
+      businessId,
     }),
   }
 );
 
-const subscriptionResult =
-  await subscriptionResponse.json();
+const access = await subscriptionResponse.json();
 
-if (
-  !subscriptionResponse.ok ||
-  !subscriptionResult.allowed
-) {
+if (!subscriptionResponse.ok || !access.allowed) {
   setError(
-    subscriptionResult.error ||
+    access.error ||
       "Free plan limit reached. Please upgrade to Professional."
   );
+
   setSaving(false);
   return;
 }
@@ -268,16 +325,18 @@ if (
           </div>
 
           <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={() => {
-                resetForm();
-                setShowForm(true);
-              }}
-              className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold transition hover:bg-blue-500"
-            >
-              + Add Customer
-            </button>
+           {canAddCustomer && !subscriptionLoading && (
+  <button
+    type="button"
+    onClick={() => {
+      resetForm();
+      setShowForm(true);
+    }}
+    className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold transition hover:bg-blue-500"
+  >
+    + Add Customer
+  </button>
+)}
 
             <button
               type="button"
@@ -295,7 +354,7 @@ if (
           </div>
         )}
 
-        {showForm && (
+        {showForm && canAddCustomer && (
           <div className="mb-8 rounded-2xl border border-white/10 bg-white/5 p-6">
             <div className="mb-6 flex items-center justify-between">
               <div>
@@ -490,16 +549,18 @@ if (
                 FlowPilot customer database.
               </p>
 
-              <button
-                type="button"
-                onClick={() => {
-                  resetForm();
-                  setShowForm(true);
-                }}
-                className="mt-6 rounded-lg bg-blue-600 px-5 py-3 font-semibold transition hover:bg-blue-500"
-              >
-                Add your first customer
-              </button>
+             {canAddCustomer && (
+  <button
+    type="button"
+    onClick={() => {
+      resetForm();
+      setShowForm(true);
+    }}
+    className="mt-6 rounded-lg bg-blue-600 px-5 py-3 font-semibold transition hover:bg-blue-500"
+  >
+    Add your first customer
+  </button>
+)}
             </div>
           </div>
         ) : (

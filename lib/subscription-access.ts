@@ -28,11 +28,11 @@ const FREE_LIMITS: Record<
   number | null
 > = {
   ai_follow_up: 3,
-  customer: 25,
-  lead: 25,
-  job: 25,
-  quote: 25,
-  invoice: 25,
+  customer: 5,
+  lead: 5,
+  job: 5,
+  quote: 5,
+  invoice: 5,
 };
 
 const PROFESSIONAL_LIMITS: Record<
