@@ -1334,7 +1334,7 @@ if (followUpError) {
           </Link>
 
           <Link
-            href="/dashboard/quotes/reminders"
+            href="/dashboard/quote-reminders"
             className="rounded-xl border border-white/10 bg-slate-900 p-6 transition hover:border-yellow-500/40"
           >
             <div className="flex items-center justify-between">
