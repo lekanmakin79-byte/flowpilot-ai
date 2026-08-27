@@ -38,8 +38,7 @@ export default function QuoteFollowUpPage() {
 
   const quoteId = params?.id as string;
 
-  const [quote, setQuote] =
-    useState<QuoteDetails | null>(null);
+  const [quote, setQuote] = useState<QuoteDetails | null>(null);
 
   const [followUp, setFollowUp] =
     useState<FollowUpRecord | null>(null);
@@ -47,26 +46,25 @@ export default function QuoteFollowUpPage() {
   const [result, setResult] =
     useState<FollowUpResult | null>(null);
 
-  const [loading, setLoading] =
-    useState(true);
+  const [businessId, setBusinessId] =
+    useState<string | null>(null);
 
-  const [generating, setGenerating] =
-    useState(false);
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [completing, setCompleting] = useState(false);
 
-  const [completing, setCompleting] =
-    useState(false);
+  const [completed, setCompleted] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
 
-  const [completed, setCompleted] =
-    useState(false);
+  const [emailId, setEmailId] =
+    useState<string | null>(null);
 
-  const [error, setError] =
-    useState("");
-
-  const [copied, setCopied] =
-    useState(false);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
 
   // ----------------------------------------
-  // LOAD QUOTE + FOLLOW-UP
+  // LOAD QUOTE + BUSINESS + FOLLOW-UP
   // ----------------------------------------
 
   useEffect(() => {
@@ -74,22 +72,59 @@ export default function QuoteFollowUpPage() {
       setLoading(true);
       setError("");
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        router.replace("/login");
-        return;
-      }
-
-      if (!quoteId) {
-        setError("Quote ID is missing.");
-        setLoading(false);
-        return;
-      }
-
       try {
+        const {
+          data: { user },
+          error: authError,
+        } = await supabase.auth.getUser();
+
+        if (authError) {
+          throw authError;
+        }
+
+        if (!user) {
+          router.replace("/login");
+          return;
+        }
+
+        if (!quoteId) {
+          setError("Quote ID is missing.");
+          setLoading(false);
+          return;
+        }
+
+        // ----------------------------------------
+        // LOAD USER BUSINESS
+        // ----------------------------------------
+
+        const {
+          data: businessData,
+          error: businessError,
+        } = await supabase
+          .from("businesses")
+          .select("id")
+          .eq("owner_id", user.id)
+          .maybeSingle();
+
+        if (businessError) {
+          console.error(
+            "Business lookup error:",
+            businessError
+          );
+
+          throw new Error(
+            "Unable to load your business."
+          );
+        }
+
+        if (!businessData?.id) {
+          throw new Error(
+            "Unable to verify your business."
+          );
+        }
+
+        setBusinessId(businessData.id);
+
         // ----------------------------------------
         // LOAD QUOTE
         // ----------------------------------------
@@ -114,16 +149,6 @@ export default function QuoteFollowUpPage() {
           .eq("id", quoteId)
           .maybeSingle();
 
-        console.log(
-          "FOLLOW-UP QUOTE:",
-          quoteData
-        );
-
-        console.log(
-          "FOLLOW-UP QUOTE ERROR:",
-          quoteError
-        );
-
         if (quoteError) {
           throw quoteError;
         }
@@ -143,10 +168,10 @@ export default function QuoteFollowUpPage() {
           id: quoteData.id,
 
           quote_number:
-            quoteData.quote_number,
+            quoteData.quote_number ?? null,
 
           title:
-            quoteData.title,
+            quoteData.title ?? null,
 
           total:
             Number(quoteData.total) || 0,
@@ -157,13 +182,13 @@ export default function QuoteFollowUpPage() {
                   customerData.first_name,
 
                 last_name:
-                  customerData.last_name,
+                  customerData.last_name ?? null,
 
                 email:
-                  customerData.email,
+                  customerData.email ?? null,
 
                 company_name:
-                  customerData.company_name,
+                  customerData.company_name ?? null,
               }
             : null,
         };
@@ -192,22 +217,16 @@ export default function QuoteFollowUpPage() {
           .limit(1)
           .maybeSingle();
 
-        console.log(
-          "FOLLOW-UP RECORD:",
-          followUpData
-        );
-
-        console.log(
-          "FOLLOW-UP RECORD ERROR:",
-          followUpError
-        );
-
         if (followUpError) {
           throw followUpError;
         }
 
         if (followUpData) {
-          setFollowUp(followUpData);
+          setFollowUp({
+            id: followUpData.id,
+            status: followUpData.status,
+            due_at: followUpData.due_at,
+          });
         } else {
           setFollowUp(null);
         }
@@ -235,7 +254,12 @@ export default function QuoteFollowUpPage() {
   // ----------------------------------------
 
   async function generateFollowUp() {
-    if (!quoteId || generating) {
+    if (
+      !quoteId ||
+      generating ||
+      sending ||
+      completing
+    ) {
       return;
     }
 
@@ -274,6 +298,9 @@ export default function QuoteFollowUpPage() {
       }
 
       setResult(data.followUp);
+      setEmailSent(false);
+      setEmailId(null);
+      setCompleted(false);
     } catch (err) {
       console.error(
         "Follow-up generation error:",
@@ -321,12 +348,150 @@ export default function QuoteFollowUpPage() {
     }
   }
 
-    // ----------------------------------------
+  // ----------------------------------------
+  // SEND EMAIL WITH RESEND
+  // ----------------------------------------
+
+  async function sendEmailWithResend() {
+    if (
+      !result?.message ||
+      sending ||
+      completed
+    ) {
+      return;
+    }
+
+    if (!result.customerEmail) {
+      setError(
+        "This customer does not have an email address."
+      );
+      return;
+    }
+
+    if (!businessId) {
+      setError(
+        "Your business could not be verified. Please refresh the page and try again."
+      );
+      return;
+    }
+
+    setError("");
+    setSending(true);
+    setEmailSent(false);
+    setEmailId(null);
+
+    try {
+      const {
+        data: sessionData,
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const accessToken =
+        sessionData.session?.access_token;
+
+      if (!accessToken) {
+        router.replace("/login");
+        return;
+      }
+
+      const response = await fetch(
+        "/api/quote-reminders/send-email",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+
+            Authorization:
+              `Bearer ${accessToken}`,
+          },
+
+          body: JSON.stringify({
+            quoteId,
+
+            businessId,
+
+            reminderId:
+              followUp?.id ?? null,
+
+            message:
+              result.message,
+          }),
+        }
+      );
+
+      const data =
+        await response.json();
+
+      if (
+        !response.ok ||
+        !data.success
+      ) {
+        throw new Error(
+          data.error ||
+            "Unable to send the follow-up email."
+        );
+      }
+
+      setEmailSent(true);
+
+      setEmailId(
+        data.emailId || null
+      );
+
+      const reminderCompleted =
+        Boolean(
+          data.reminderCompleted
+        );
+
+      setCompleted(
+        reminderCompleted
+      );
+
+      if (followUp) {
+        setFollowUp({
+          id: followUp.id,
+
+          status:
+            reminderCompleted
+              ? "completed"
+              : followUp.status,
+
+          due_at:
+            followUp.due_at,
+        });
+      }
+    } catch (err) {
+      console.error(
+        "Send follow-up email error:",
+        err
+      );
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to send the follow-up email."
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
+  // ----------------------------------------
   // MARK FOLLOW-UP COMPLETED
   // ----------------------------------------
 
   async function markFollowUpCompleted() {
-    if (!followUp?.id || completing) {
+    if (
+      !followUp?.id ||
+      completing ||
+      sending
+    ) {
       return;
     }
 
@@ -334,21 +499,8 @@ export default function QuoteFollowUpPage() {
     setCompleting(true);
 
     try {
-      const now = new Date().toISOString();
-
-      console.log(
-        "MARKING FOLLOW-UP COMPLETED:",
-        followUp.id
-      );
-
-      console.log(
-        "FOLLOW-UP BUSINESS ID:",
-        "20f0653b-a311-42fd-b417-4cffac16d2d5"
-      );
-
-      // ----------------------------------------
-      // UPDATE FOLLOW-UP
-      // ----------------------------------------
+      const now =
+        new Date().toISOString();
 
       const {
         error: updateError,
@@ -361,47 +513,29 @@ export default function QuoteFollowUpPage() {
         .eq("id", followUp.id)
         .eq("status", "pending");
 
-      console.log(
-        "FOLLOW-UP UPDATE ERROR:",
-        updateError
-      );
-
       if (updateError) {
         throw updateError;
       }
-
-      // ----------------------------------------
-      // VERIFY THE DATABASE
-      // ----------------------------------------
 
       const {
         data: verifyData,
         error: verifyError,
       } = await supabase
         .from("quote_follow_ups")
-        .select(
-          "id, quote_id, business_id, status, due_at, completed_at"
-        )
+        .select(`
+          id,
+          quote_id,
+          business_id,
+          status,
+          due_at,
+          completed_at
+        `)
         .eq("id", followUp.id)
         .maybeSingle();
-
-      console.log(
-        "FOLLOW-UP AFTER UPDATE:",
-        verifyData
-      );
-
-      console.log(
-        "FOLLOW-UP VERIFY ERROR:",
-        verifyError
-      );
 
       if (verifyError) {
         throw verifyError;
       }
-
-      // ----------------------------------------
-      // DATABASE DID NOT CHANGE
-      // ----------------------------------------
 
       if (!verifyData) {
         throw new Error(
@@ -409,20 +543,14 @@ export default function QuoteFollowUpPage() {
         );
       }
 
-      if (verifyData.status !== "completed") {
+      if (
+        verifyData.status !==
+        "completed"
+      ) {
         throw new Error(
           `The follow-up is still "${verifyData.status}" in the database.`
         );
       }
-
-      // ----------------------------------------
-      // SUCCESS
-      // ----------------------------------------
-
-      console.log(
-        "FOLLOW-UP SUCCESSFULLY COMPLETED:",
-        verifyData
-      );
 
       setCompleted(true);
 
@@ -431,7 +559,6 @@ export default function QuoteFollowUpPage() {
         status: verifyData.status,
         due_at: verifyData.due_at,
       });
-
     } catch (err) {
       console.error(
         "Complete follow-up error:",
@@ -479,16 +606,12 @@ export default function QuoteFollowUpPage() {
     <main className="min-h-screen bg-slate-950 px-4 py-8 text-white sm:px-6">
       <div className="mx-auto max-w-4xl">
 
-        {/* BACK */}
-
         <Link
           href={`/dashboard/quotes/${quoteId}`}
           className="text-sm text-blue-400 transition hover:text-blue-300"
         >
           ← Back to quote
         </Link>
-
-        {/* HEADER */}
 
         <div className="mt-6">
 
@@ -521,19 +644,11 @@ export default function QuoteFollowUpPage() {
 
         </div>
 
-        {/* MAIN CARD */}
-
         <div className="mt-8 rounded-2xl border border-white/10 bg-slate-900 p-5 sm:p-8">
-
-          {/* ----------------------------------------
-              BEFORE GENERATION
-          ---------------------------------------- */}
 
           {!result &&
             !generating && (
               <div>
-
-                {/* QUOTE SUMMARY */}
 
                 {quote && (
                   <div className="rounded-xl border border-white/10 bg-slate-950/50 p-5">
@@ -551,23 +666,15 @@ export default function QuoteFollowUpPage() {
                         : "Customer"}
                     </h2>
 
-                    {quote.customer
-                      ?.email && (
+                    {quote.customer?.email && (
                       <p className="mt-1 text-sm text-slate-400">
-                        {
-                          quote
-                            .customer
-                            .email
-                        }
+                        {quote.customer.email}
                       </p>
                     )}
 
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">
 
-                      {/* QUOTE NUMBER */}
-
                       <div className="rounded-lg bg-slate-900 p-3">
-
                         <p className="text-xs text-slate-500">
                           Quote
                         </p>
@@ -576,13 +683,9 @@ export default function QuoteFollowUpPage() {
                           {quote.quote_number ??
                             "Quote"}
                         </p>
-
                       </div>
 
-                      {/* SERVICE */}
-
                       <div className="rounded-lg bg-slate-900 p-3">
-
                         <p className="text-xs text-slate-500">
                           Service
                         </p>
@@ -591,13 +694,9 @@ export default function QuoteFollowUpPage() {
                           {quote.title ??
                             "Quote"}
                         </p>
-
                       </div>
 
-                      {/* TOTAL */}
-
                       <div className="rounded-lg bg-slate-900 p-3">
-
                         <p className="text-xs text-slate-500">
                           Quote total
                         </p>
@@ -609,15 +708,12 @@ export default function QuoteFollowUpPage() {
                             0
                           ).toFixed(2)}
                         </p>
-
                       </div>
 
                     </div>
 
                   </div>
                 )}
-
-                {/* GENERATE AREA */}
 
                 <div className="mt-6 text-center">
 
@@ -639,10 +735,13 @@ export default function QuoteFollowUpPage() {
 
                   <button
                     type="button"
-                    onClick={
-                      generateFollowUp
+                    onClick={generateFollowUp}
+                    disabled={
+                      generating ||
+                      sending ||
+                      completing
                     }
-                    className="mt-6 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-blue-500"
+                    className="mt-6 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     🤖 Generate Follow-Up
                   </button>
@@ -651,10 +750,6 @@ export default function QuoteFollowUpPage() {
 
               </div>
             )}
-
-          {/* ----------------------------------------
-              GENERATING
-          ---------------------------------------- */}
 
           {generating && (
             <div className="py-16 text-center">
@@ -674,14 +769,8 @@ export default function QuoteFollowUpPage() {
             </div>
           )}
 
-          {/* ----------------------------------------
-              GENERATED RESULT
-          ---------------------------------------- */}
-
           {result && (
             <div>
-
-              {/* CUSTOMER + QUOTE */}
 
               <div className="rounded-xl border border-white/10 bg-slate-950/50 p-5">
 
@@ -701,10 +790,7 @@ export default function QuoteFollowUpPage() {
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-3">
 
-                  {/* QUOTE */}
-
                   <div className="rounded-lg bg-slate-900 p-3">
-
                     <p className="text-xs text-slate-500">
                       Quote
                     </p>
@@ -714,13 +800,9 @@ export default function QuoteFollowUpPage() {
                         result.quoteNumber ??
                         "Quote"}
                     </p>
-
                   </div>
 
-                  {/* SERVICE */}
-
                   <div className="rounded-lg bg-slate-900 p-3">
-
                     <p className="text-xs text-slate-500">
                       Service
                     </p>
@@ -729,13 +811,9 @@ export default function QuoteFollowUpPage() {
                       {quote?.title ??
                         "Quote"}
                     </p>
-
                   </div>
 
-                  {/* TOTAL */}
-
                   <div className="rounded-lg bg-slate-900 p-3">
-
                     <p className="text-xs text-slate-500">
                       Quote total
                     </p>
@@ -747,16 +825,11 @@ export default function QuoteFollowUpPage() {
                         0
                       ).toFixed(2)}
                     </p>
-
                   </div>
 
                 </div>
 
               </div>
-
-              {/* ----------------------------------------
-                  MESSAGE
-              ---------------------------------------- */}
 
               <div className="mt-6">
 
@@ -768,10 +841,9 @@ export default function QuoteFollowUpPage() {
 
                   <button
                     type="button"
-                    onClick={
-                      copyMessage
-                    }
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/10"
+                    onClick={copyMessage}
+                    disabled={sending}
+                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-slate-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {copied
                       ? "✓ Copied"
@@ -781,21 +853,20 @@ export default function QuoteFollowUpPage() {
                 </div>
 
                 <textarea
-                  value={
-                    result.message
-                  }
-                  onChange={(
-                    event
-                  ) =>
+                  value={result.message}
+                  onChange={(event) =>
                     setResult({
                       ...result,
                       message:
-                        event.target
-                          .value,
+                        event.target.value,
                     })
                   }
+                  disabled={
+                    sending ||
+                    emailSent
+                  }
                   rows={12}
-                  className="mt-3 w-full resize-y rounded-xl border border-white/10 bg-slate-950 p-5 text-sm leading-7 text-slate-200 outline-none transition focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20"
+                  className="mt-3 w-full resize-y rounded-xl border border-white/10 bg-slate-950 p-5 text-sm leading-7 text-slate-200 outline-none transition focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-70"
                 />
 
                 <p className="mt-3 text-xs text-slate-600">
@@ -806,146 +877,230 @@ export default function QuoteFollowUpPage() {
 
               </div>
 
-              {/* ----------------------------------------
-                  ACTIONS
-              ---------------------------------------- */}
+              {emailSent && (
+                <div className="mt-6 rounded-xl border border-green-500/20 bg-green-500/10 p-5">
 
-              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                  <div className="flex items-start gap-3">
 
-                {/* GENERATE ANOTHER */}
+                    <span className="text-xl">
+                      ✓
+                    </span>
 
-                <button
-                  type="button"
-                  onClick={
-                    generateFollowUp
-                  }
-                  disabled={
-                    generating ||
-                    completing
-                  }
-                  className="rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-medium text-slate-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  🔄 Generate Another
-                </button>
+                    <div>
 
-                {/* OPEN EMAIL */}
+                      <h3 className="font-semibold text-green-300">
+                        Email sent successfully
+                      </h3>
 
-                {result.customerEmail && (
-                  <a
-                    href={`mailto:${result.customerEmail}?subject=${encodeURIComponent(
-                      result.quoteNumber
-                        ? `Follow-up regarding quote ${result.quoteNumber}`
-                        : "Follow-up regarding your quote"
-                    )}&body=${encodeURIComponent(
-                      result.message
-                    )}`}
-                    className="rounded-xl bg-blue-600 px-5 py-3 text-center text-sm font-semibold text-white transition hover:bg-blue-500"
-                  >
-                    ✉️ Open Email
-                  </a>
-                )}
+                      <p className="mt-1 text-sm text-green-400/80">
+                        The follow-up email was
+                        accepted by Resend and
+                        sent to{" "}
+                        {result.customerEmail}.
+                      </p>
 
-              </div>
-
-              {/* ----------------------------------------
-                  COMPLETE FOLLOW-UP
-              ---------------------------------------- */}
-
-              <div className="mt-8 border-t border-white/10 pt-6">
-
-                {completed ? (
-                  <div className="rounded-xl border border-green-500/20 bg-green-500/10 p-5">
-
-                    <div className="flex items-start gap-3">
-
-                      <span className="text-xl">
-                        ✅
-                      </span>
-
-                      <div>
-
-                        <h3 className="font-semibold text-green-300">
-                          Follow-up completed
-                        </h3>
-
-                        <p className="mt-1 text-sm text-green-400/80">
-                          This follow-up has
-                          been marked as
-                          completed and will
-                          no longer appear in
-                          your dashboard
-                          attention list.
+                      {emailId && (
+                        <p className="mt-2 break-all text-xs text-green-400/60">
+                          Email ID: {emailId}
                         </p>
+                      )}
 
-                      </div>
+                      {followUp && completed && (
+                        <p className="mt-2 text-xs text-green-400/60">
+                          The pending follow-up
+                          reminder was also marked
+                          as completed.
+                        </p>
+                      )}
+
+                      {!followUp && (
+                        <p className="mt-2 text-xs text-green-400/60">
+                          No pending reminder was
+                          attached to this quote.
+                        </p>
+                      )}
 
                     </div>
 
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={returnToDashboard}
+                    className="mt-4 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-500"
+                  >
+                    Return to Dashboard
+                  </button>
+
+                </div>
+              )}
+
+              {!emailSent && (
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+
+                  <button
+                    type="button"
+                    onClick={generateFollowUp}
+                    disabled={
+                      generating ||
+                      sending ||
+                      completing
+                    }
+                    className="rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-medium text-slate-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    🔄 Generate Another
+                  </button>
+
+                  {result.customerEmail && (
                     <button
                       type="button"
                       onClick={
-                        returnToDashboard
+                        sendEmailWithResend
                       }
-                      className="mt-4 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-500"
+                      disabled={
+                        sending ||
+                        completing ||
+                        !businessId
+                      }
+                      className="rounded-xl bg-green-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      Return to Dashboard
+                      {sending
+                        ? "Sending..."
+                        : "✉️ Send with Resend"}
                     </button>
+                  )}
+
+                  {result.customerEmail && (
+                    <a
+                      href={`mailto:${result.customerEmail}?subject=${encodeURIComponent(
+                        result.quoteNumber
+                          ? `Follow-up regarding quote ${result.quoteNumber}`
+                          : "Follow-up regarding your quote"
+                      )}&body=${encodeURIComponent(
+                        result.message
+                      )}`}
+                      className="rounded-xl border border-blue-500/30 bg-blue-600/10 px-5 py-3 text-center text-sm font-semibold text-blue-300 transition hover:bg-blue-600/20"
+                    >
+                      ✉️ Open Email
+                    </a>
+                  )}
+
+                </div>
+              )}
+
+              {!followUp &&
+                !emailSent && (
+                  <div className="mt-5 rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
+
+                    <p className="text-sm font-medium text-blue-300">
+                      Ready to send
+                    </p>
+
+                    <p className="mt-1 text-xs leading-5 text-slate-400">
+                      This quote does not have a
+                      pending reminder, but you can
+                      still send this follow-up
+                      directly with Resend.
+                    </p>
 
                   </div>
-                ) : followUp ? (
-                  <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-5">
+                )}
 
-                    <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+              {!emailSent && (
+                <div className="mt-8 border-t border-white/10 pt-6">
 
-                      <div>
+                  {completed ? (
+                    <div className="rounded-xl border border-green-500/20 bg-green-500/10 p-5">
 
-                        <h3 className="font-semibold text-yellow-300">
-                          Follow-up still needs
-                          attention
-                        </h3>
+                      <div className="flex items-start gap-3">
 
-                        <p className="mt-1 text-sm text-slate-400">
-                          Once you have dealt
-                          with this follow-up,
-                          mark it as completed.
-                        </p>
+                        <span className="text-xl">
+                          ✓
+                        </span>
+
+                        <div>
+
+                          <h3 className="font-semibold text-green-300">
+                            Follow-up completed
+                          </h3>
+
+                          <p className="mt-1 text-sm text-green-400/80">
+                            This follow-up has been
+                            marked as completed and
+                            will no longer appear in
+                            your dashboard attention
+                            list.
+                          </p>
+
+                        </div>
 
                       </div>
 
                       <button
                         type="button"
                         onClick={
-                          markFollowUpCompleted
+                          returnToDashboard
                         }
-                        disabled={
-                          completing
-                        }
-                        className="shrink-0 rounded-xl bg-green-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="mt-4 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-500"
                       >
-                        {completing
-                          ? "Completing..."
-                          : "✓ Mark as Completed"}
+                        Return to Dashboard
                       </button>
 
                     </div>
+                  ) : followUp ? (
+                    <div className="rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-5">
 
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-400">
-                    No pending follow-up
-                    record was found for
-                    this quote.
-                  </div>
-                )}
+                      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
 
-              </div>
+                        <div>
+
+                          <h3 className="font-semibold text-yellow-300">
+                            Follow-up still needs
+                            attention
+                          </h3>
+
+                          <p className="mt-1 text-sm text-slate-400">
+                            You can send the email
+                            with Resend above, or
+                            mark this follow-up as
+                            completed manually.
+                          </p>
+
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={
+                            markFollowUpCompleted
+                          }
+                          disabled={
+                            completing ||
+                            sending
+                          }
+                          className="shrink-0 rounded-xl bg-green-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {completing
+                            ? "Completing..."
+                            : "✓ Mark as Completed"}
+                        </button>
+
+                      </div>
+
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-400">
+                      No pending follow-up record
+                      was found for this quote.
+                      Sending with Resend is still
+                      available above.
+                    </div>
+                  )}
+
+                </div>
+              )}
 
             </div>
           )}
-
-          {/* ----------------------------------------
-              ERROR
-          ---------------------------------------- */}
 
           {error && (
             <div className="mt-5 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
@@ -955,12 +1110,10 @@ export default function QuoteFollowUpPage() {
 
         </div>
 
-        {/* NOTICE */}
-
         <div className="mt-5 rounded-xl border border-white/10 bg-slate-900 p-4 text-center text-xs leading-5 text-slate-500">
           FlowPilot AI creates a draft for you to
-          review. It does not automatically send
-          messages.
+          review. Emails are only sent when you
+          explicitly click "Send with Resend".
         </div>
 
       </div>

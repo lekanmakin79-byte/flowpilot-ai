@@ -39,9 +39,15 @@ export default function QuoteRemindersPage() {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [completingId, setCompletingId] = useState<string | null>(
-    null
-  );
+
+  const [completingId, setCompletingId] =
+    useState<string | null>(null);
+
+  const [sendingId, setSendingId] =
+    useState<string | null>(null);
+
+  const [sendSuccess, setSendSuccess] =
+    useState<string | null>(null);
 
   useEffect(() => {
     loadReminders();
@@ -169,10 +175,14 @@ export default function QuoteRemindersPage() {
                   id: quoteData.id,
                   quote_number:
                     quoteData.quote_number,
-                  title: quoteData.title,
+                  title:
+                    quoteData.title,
                   total:
-                    Number(quoteData.total) || 0,
-                  status: quoteData.status,
+                    Number(
+                      quoteData.total
+                    ) || 0,
+                  status:
+                    quoteData.status,
                   created_at:
                     quoteData.created_at,
                   valid_until:
@@ -183,12 +193,9 @@ export default function QuoteRemindersPage() {
           };
         });
 
-      console.log(
-        "QUOTE REMINDERS:",
+      setReminders(
         formattedReminders
       );
-
-      setReminders(formattedReminders);
     } catch (err) {
       console.error(
         "Quote reminders page error:",
@@ -205,14 +212,133 @@ export default function QuoteRemindersPage() {
     }
   }
 
-  async function markCompleted(
-    reminderId: string
+  // ----------------------------------------
+  // SEND FOLLOW-UP EMAIL
+  // ----------------------------------------
+
+  async function sendEmail(
+    reminder: Reminder
   ) {
-    if (completingId) {
+    if (sendingId) {
       return;
     }
 
     setError("");
+    setSendSuccess(null);
+
+    const customer =
+      reminder.quote?.customer;
+
+    if (!customer?.email) {
+      setError(
+        "This customer does not have an email address."
+      );
+      return;
+    }
+
+    if (!reminder.generated_message?.trim()) {
+      setError(
+        "Generate the follow-up message before sending the email."
+      );
+      return;
+    }
+
+    setSendingId(reminder.id);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session?.access_token) {
+        router.replace("/login");
+        return;
+      }
+
+      const response = await fetch(
+        "/api/quote-reminders/send-email",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            reminderId: reminder.id,
+            message:
+              reminder.generated_message,
+          }),
+        }
+      );
+
+      const contentType =
+        response.headers.get(
+          "content-type"
+        ) || "";
+
+      if (
+        !contentType.includes(
+          "application/json"
+        )
+      ) {
+        throw new Error(
+          `Email server returned an unexpected response (${response.status}).`
+        );
+      }
+
+      const result =
+        await response.json();
+
+      if (
+        !response.ok ||
+        !result.success
+      ) {
+        throw new Error(
+          result.error ||
+            "Unable to send the follow-up email."
+        );
+      }
+
+      setSendSuccess(
+        `Follow-up email sent successfully to ${customer.email}.`
+      );
+
+      setReminders((current) =>
+        current.filter(
+          (item) =>
+            item.id !== reminder.id
+        )
+      );
+    } catch (err) {
+      console.error(
+        "Send follow-up email error:",
+        err
+      );
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to send the follow-up email."
+      );
+    } finally {
+      setSendingId(null);
+    }
+  }
+
+  // ----------------------------------------
+  // MARK COMPLETED
+  // ----------------------------------------
+
+  async function markCompleted(
+    reminderId: string
+  ) {
+    if (completingId || sendingId) {
+      return;
+    }
+
+    setError("");
+    setSendSuccess(null);
     setCompletingId(reminderId);
 
     try {
@@ -298,25 +424,28 @@ export default function QuoteRemindersPage() {
   }
 
   function getCustomerName(
-  customer: NonNullable<Reminder["quote"]>["customer"]
-) {
-  if (!customer) {
-    return "Unknown customer";
+    customer:
+      NonNullable<
+        Reminder["quote"]
+      >["customer"]
+  ) {
+    if (!customer) {
+      return "Unknown customer";
+    }
+
+    const fullName = [
+      customer.first_name,
+      customer.last_name,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    return (
+      customer.company_name ||
+      fullName ||
+      "Customer"
+    );
   }
-
-  const fullName = [
-    customer.first_name,
-    customer.last_name,
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  return (
-    customer.company_name ||
-    fullName ||
-    "Customer"
-  );
-}
 
   function getDaysWaiting(
     createdAt: string
@@ -391,6 +520,14 @@ export default function QuoteRemindersPage() {
 
           </div>
         </div>
+
+        {/* SUCCESS */}
+
+        {sendSuccess && (
+          <div className="mb-6 rounded-xl border border-green-500/20 bg-green-500/10 p-4 text-sm text-green-300">
+            {sendSuccess}
+          </div>
+        )}
 
         {/* ERROR */}
 
@@ -486,9 +623,9 @@ export default function QuoteRemindersPage() {
                   quote?.customer;
 
                 const customerName =
-  getCustomerName(
-    customer ?? null
-  );
+                  getCustomerName(
+                    customer ?? null
+                  );
 
                 const daysWaiting =
                   quote
@@ -496,6 +633,20 @@ export default function QuoteRemindersPage() {
                         quote.created_at
                       )
                     : 0;
+
+                const isSending =
+                  sendingId ===
+                  reminder.id;
+
+                const isCompleting =
+                  completingId ===
+                  reminder.id;
+
+                const canSend =
+                  Boolean(
+                    customer?.email &&
+                    reminder.generated_message?.trim()
+                  );
 
                 return (
                   <div
@@ -532,9 +683,13 @@ export default function QuoteRemindersPage() {
                           {customerName}
                         </p>
 
-                        {customer?.email && (
+                        {customer?.email ? (
                           <p className="mt-1 text-sm text-slate-500">
                             {customer.email}
+                          </p>
+                        ) : (
+                          <p className="mt-1 text-sm text-red-400">
+                            No customer email
                           </p>
                         )}
 
@@ -597,6 +752,26 @@ export default function QuoteRemindersPage() {
 
                         </div>
 
+                        {/* MESSAGE STATUS */}
+
+                        <div className="mt-4 rounded-lg border border-white/5 bg-slate-950/40 p-4">
+
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Follow-up message
+                          </p>
+
+                          {reminder.generated_message ? (
+                            <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-300">
+                              {reminder.generated_message}
+                            </p>
+                          ) : (
+                            <p className="mt-2 text-sm text-slate-500">
+                              No follow-up message has been generated yet.
+                            </p>
+                          )}
+
+                        </div>
+
                       </div>
 
                       {/* ACTIONS */}
@@ -610,6 +785,31 @@ export default function QuoteRemindersPage() {
                           >
                             Generate follow-up
                           </Link>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            sendEmail(
+                              reminder
+                            )
+                          }
+                          disabled={
+                            !canSend ||
+                            isSending ||
+                            isCompleting
+                          }
+                          className="rounded-lg bg-green-600 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {isSending
+                            ? "Sending..."
+                            : "✉ Send Email"}
+                        </button>
+
+                        {!reminder.generated_message && (
+                          <p className="text-center text-xs text-slate-500">
+                            Generate the follow-up message before sending.
+                          </p>
                         )}
 
                         {quote && (
@@ -629,13 +829,12 @@ export default function QuoteRemindersPage() {
                             )
                           }
                           disabled={
-                            completingId ===
-                            reminder.id
+                            isSending ||
+                            isCompleting
                           }
                           className="rounded-lg border border-green-500/20 bg-green-500/10 px-4 py-3 text-sm font-semibold text-green-300 hover:bg-green-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          {completingId ===
-                          reminder.id
+                          {isCompleting
                             ? "Completing..."
                             : "Mark completed"}
                         </button>
