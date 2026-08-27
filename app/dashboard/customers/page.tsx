@@ -116,8 +116,66 @@ export default function CustomersPage() {
       return;
     }
 
-    setSaving(true);
+        setSaving(true);
     setError("");
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+
+    // ----------------------------------------
+    // CHECK SUBSCRIPTION ACCESS
+    // ----------------------------------------
+
+   const {
+  data: { session },
+} = await supabase.auth.getSession();
+
+if (!session?.access_token) {
+  setError(
+    "Your session has expired. Please log in again."
+  );
+  setSaving(false);
+  return;
+}
+
+const subscriptionResponse = await fetch(
+  "/api/subscription/check",
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({
+      resource: "customer",
+    }),
+  }
+);
+
+const subscriptionResult =
+  await subscriptionResponse.json();
+
+if (
+  !subscriptionResponse.ok ||
+  !subscriptionResult.allowed
+) {
+  setError(
+    subscriptionResult.error ||
+      "Free plan limit reached. Please upgrade to Professional."
+  );
+  setSaving(false);
+  return;
+}
+
+    // ----------------------------------------
+    // CREATE CUSTOMER
+    // ----------------------------------------
 
     const { error: insertError } = await supabase
       .from("customers")
@@ -143,7 +201,7 @@ export default function CustomersPage() {
     setShowForm(false);
     setSaving(false);
 
-    await loadCustomers();
+        await loadCustomers();
   }
 
   async function handleArchiveCustomer(customerId: string) {

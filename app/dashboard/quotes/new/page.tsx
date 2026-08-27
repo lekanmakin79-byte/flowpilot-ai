@@ -5,6 +5,7 @@ import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
+
 type Customer = {
   id: string;
   first_name: string;
@@ -55,12 +56,14 @@ export default function NewQuotePage() {
         return;
       }
 
-      const { data: business, error: businessError } =
-        await supabase
-          .from("businesses")
-          .select("id")
-          .eq("owner_id", user.id)
-          .maybeSingle();
+      const {
+        data: business,
+        error: businessError,
+      } = await supabase
+        .from("businesses")
+        .select("id")
+        .eq("owner_id", user.id)
+        .maybeSingle();
 
       if (businessError) {
         console.error(businessError);
@@ -74,14 +77,18 @@ export default function NewQuotePage() {
         return;
       }
 
-      const { data: customerData, error: customerError } =
-        await supabase
-          .from("customers")
-          .select(
-            "id, first_name, last_name, company_name"
-          )
-          .eq("business_id", business.id)
-          .order("first_name", { ascending: true });
+      const {
+        data: customerData,
+        error: customerError,
+      } = await supabase
+        .from("customers")
+        .select(
+          "id, first_name, last_name, company_name"
+        )
+        .eq("business_id", business.id)
+        .order("first_name", {
+          ascending: true,
+        });
 
       if (customerError) {
         console.error(customerError);
@@ -90,14 +97,18 @@ export default function NewQuotePage() {
         return;
       }
 
-      const { data: jobData, error: jobError } =
-        await supabase
-          .from("jobs")
-          .select(
-            "id, title, customer_id, estimated_value"
-          )
-          .eq("business_id", business.id)
-          .order("created_at", { ascending: false });
+      const {
+        data: jobData,
+        error: jobError,
+      } = await supabase
+        .from("jobs")
+        .select(
+          "id, title, customer_id, estimated_value"
+        )
+        .eq("business_id", business.id)
+        .order("created_at", {
+          ascending: false,
+        });
 
       if (jobError) {
         console.error(jobError);
@@ -171,30 +182,81 @@ export default function NewQuotePage() {
 
     setSaving(true);
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    if (!user) {
-      router.replace("/login");
-      return;
-    }
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
 
-    const { data: business, error: businessError } =
-      await supabase
+      const {
+        data: business,
+        error: businessError,
+      } = await supabase
         .from("businesses")
         .select("id")
         .eq("owner_id", user.id)
         .maybeSingle();
 
-    if (businessError || !business) {
-      setError("Unable to find your business.");
-      setSaving(false);
-      return;
-    }
+      if (businessError || !business) {
+        setError(
+          "Unable to find your business."
+        );
+        setSaving(false);
+        return;
+      }
 
-    const { data, error: insertError } =
-      await supabase
+      /*
+       * Check subscription access BEFORE creating the quote.
+       */
+     
+const {
+  data: { session },
+} = await supabase.auth.getSession();
+
+if (!session?.access_token) {
+  setError(
+    "Your session has expired. Please log in again."
+  );
+  setSaving(false);
+  return;
+}
+
+const subscriptionResponse = await fetch(
+  "/api/subscription/check",
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({
+      resource: "quote",
+    }),
+  }
+);
+
+const subscriptionResult =
+  await subscriptionResponse.json();
+
+if (
+  !subscriptionResponse.ok ||
+  !subscriptionResult.allowed
+) {
+  setError(
+    subscriptionResult.error ||
+      "Free plan limit reached. Please upgrade to Professional."
+  );
+  setSaving(false);
+  return;
+}
+      const {
+        data,
+        error: insertError,
+      } = await supabase
         .from("quotes")
         .insert({
           business_id: business.id,
@@ -210,19 +272,31 @@ export default function NewQuotePage() {
           total,
           valid_until:
             validUntil || null,
-          notes: notes.trim() || null,
+          notes:
+            notes.trim() || null,
         })
         .select()
         .single();
 
-    if (insertError) {
-      console.error(insertError);
-      setError(insertError.message);
-      setSaving(false);
-      return;
-    }
+      if (insertError) {
+        console.error(insertError);
+        setError(insertError.message);
+        setSaving(false);
+        return;
+      }
 
-    router.push(`/dashboard/quotes/${data.id}`);
+      router.push(
+        `/dashboard/quotes/${data.id}`
+      );
+    } catch (error) {
+      console.error(error);
+
+      setError(
+        "Unable to create the quote. Please try again."
+      );
+
+      setSaving(false);
+    }
   }
 
   if (loading) {
@@ -238,7 +312,6 @@ export default function NewQuotePage() {
   return (
     <main className="min-h-screen bg-slate-950 px-6 py-10 text-white">
       <div className="mx-auto max-w-4xl">
-
         <Link
           href="/dashboard/quotes"
           className="text-sm text-blue-400 hover:text-blue-300"
@@ -266,16 +339,12 @@ export default function NewQuotePage() {
           onSubmit={handleSubmit}
           className="mt-8 space-y-6"
         >
-
-          {/* Customer and Job */}
-
           <div className="rounded-2xl border border-white/10 bg-slate-900 p-6">
             <h2 className="text-lg font-semibold">
               Customer & Job
             </h2>
 
             <div className="mt-6 grid gap-6">
-
               <div>
                 <label
                   htmlFor="customer"
@@ -356,11 +425,8 @@ export default function NewQuotePage() {
                   ))}
                 </select>
               </div>
-
             </div>
           </div>
-
-          {/* Quote information */}
 
           <div className="rounded-2xl border border-white/10 bg-slate-900 p-6">
             <h2 className="text-lg font-semibold">
@@ -368,7 +434,6 @@ export default function NewQuotePage() {
             </h2>
 
             <div className="mt-6 grid gap-6">
-
               <div>
                 <label
                   htmlFor="quoteNumber"
@@ -429,11 +494,8 @@ export default function NewQuotePage() {
                   className="w-full resize-none rounded-lg border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-blue-500"
                 />
               </div>
-
             </div>
           </div>
-
-          {/* Pricing */}
 
           <div className="rounded-2xl border border-white/10 bg-slate-900 p-6">
             <h2 className="text-lg font-semibold">
@@ -441,7 +503,6 @@ export default function NewQuotePage() {
             </h2>
 
             <div className="mt-6 grid gap-6 sm:grid-cols-2">
-
               <div>
                 <label
                   htmlFor="subtotal"
@@ -485,7 +546,6 @@ export default function NewQuotePage() {
                   className="w-full rounded-lg border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-blue-500"
                 />
               </div>
-
             </div>
 
             <div className="mt-6 rounded-xl border border-white/10 bg-slate-950 p-5">
@@ -501,15 +561,12 @@ export default function NewQuotePage() {
             </div>
           </div>
 
-          {/* Validity and notes */}
-
           <div className="rounded-2xl border border-white/10 bg-slate-900 p-6">
             <h2 className="text-lg font-semibold">
               Additional information
             </h2>
 
             <div className="mt-6 grid gap-6">
-
               <div>
                 <label
                   htmlFor="validUntil"
@@ -548,14 +605,10 @@ export default function NewQuotePage() {
                   className="w-full resize-none rounded-lg border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-blue-500"
                 />
               </div>
-
             </div>
           </div>
 
-          {/* Actions */}
-
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-
             <Link
               href="/dashboard/quotes"
               className="rounded-lg border border-white/10 px-6 py-3 text-center font-semibold text-slate-300 transition hover:bg-white/5"
@@ -565,16 +618,17 @@ export default function NewQuotePage() {
 
             <button
               type="submit"
-              disabled={saving || customers.length === 0}
+              disabled={
+                saving ||
+                customers.length === 0
+              }
               className="rounded-lg bg-blue-600 px-6 py-3 font-semibold transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {saving
                 ? "Creating quote..."
                 : "Create quote"}
             </button>
-
           </div>
-
         </form>
       </div>
     </main>

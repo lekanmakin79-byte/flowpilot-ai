@@ -49,12 +49,14 @@ export default function NewJobPage() {
         return;
       }
 
-      const { data: businessData, error: businessError } =
-        await supabase
-          .from("businesses")
-          .select("id")
-          .eq("owner_id", user.id)
-          .maybeSingle();
+      const {
+        data: businessData,
+        error: businessError,
+      } = await supabase
+        .from("businesses")
+        .select("id")
+        .eq("owner_id", user.id)
+        .maybeSingle();
 
       if (businessError) {
         console.error(businessError);
@@ -70,15 +72,19 @@ export default function NewJobPage() {
 
       setBusiness(businessData);
 
-      const { data: customerData, error: customerError } =
-        await supabase
-          .from("customers")
-          .select(
-            "id, first_name, last_name, company_name"
-          )
-          .eq("business_id", businessData.id)
-          .eq("status", "active")
-          .order("first_name", { ascending: true });
+      const {
+        data: customerData,
+        error: customerError,
+      } = await supabase
+        .from("customers")
+        .select(
+          "id, first_name, last_name, company_name"
+        )
+        .eq("business_id", businessData.id)
+        .eq("status", "active")
+        .order("first_name", {
+          ascending: true,
+        });
 
       if (customerError) {
         console.error(customerError);
@@ -116,8 +122,6 @@ export default function NewJobPage() {
       return;
     }
 
-    setSaving(true);
-
     const parsedValue =
       estimatedValue.trim() !== ""
         ? Number(estimatedValue)
@@ -130,34 +134,105 @@ export default function NewJobPage() {
       setError(
         "Estimated value must be a valid positive number."
       );
-      setSaving(false);
       return;
     }
 
-    const { data, error: insertError } = await supabase
-      .from("jobs")
-      .insert({
-        business_id: business.id,
-        customer_id: customerId,
-        title: title.trim(),
-        description: description.trim() || null,
-        status,
-        scheduled_date: scheduledDate || null,
-        address: address.trim() || null,
-        estimated_value: parsedValue,
-        notes: notes.trim() || null,
-      })
-      .select("id")
-      .single();
+    setSaving(true);
 
-    if (insertError) {
-      console.error(insertError);
-      setError(insertError.message);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      /*
+       * Check subscription access BEFORE creating the job.
+       */
+      const {
+  data: { session },
+} = await supabase.auth.getSession();
+
+if (!session?.access_token) {
+  setError("Your session has expired. Please log in again.");
+  setSaving(false);
+  return;
+}
+
+const subscriptionResponse = await fetch(
+  "/api/subscription/check",
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({
+      resource: "job",
+    }),
+  }
+);
+
+const subscriptionResult =
+  await subscriptionResponse.json();
+
+if (
+  !subscriptionResponse.ok ||
+  !subscriptionResult.allowed
+) {
+  setError(
+    subscriptionResult.error ||
+      "Free plan limit reached. Please upgrade to Professional."
+  );
+  setSaving(false);
+  return;
+}
+
+      const {
+        data,
+        error: insertError,
+      } = await supabase
+        .from("jobs")
+        .insert({
+          business_id: business.id,
+          customer_id: customerId,
+          title: title.trim(),
+          description:
+            description.trim() || null,
+          status,
+          scheduled_date:
+            scheduledDate || null,
+          address:
+            address.trim() || null,
+          estimated_value: parsedValue,
+          notes:
+            notes.trim() || null,
+        })
+        .select("id")
+        .single();
+
+      if (insertError) {
+        console.error(insertError);
+        setError(insertError.message);
+        setSaving(false);
+        return;
+      }
+
+      router.push(
+        `/dashboard/jobs/${data.id}`
+      );
+    } catch (error) {
+      console.error(error);
+
+      setError(
+        "Unable to create the job. Please try again."
+      );
+
       setSaving(false);
-      return;
     }
-
-    router.push(`/dashboard/jobs/${data.id}`);
   }
 
   if (loading) {
@@ -173,7 +248,6 @@ export default function NewJobPage() {
   return (
     <main className="min-h-screen bg-slate-950 px-6 py-10 text-white">
       <div className="mx-auto max-w-3xl">
-
         <Link
           href="/dashboard/jobs"
           className="text-sm text-blue-400 hover:text-blue-300"
@@ -222,8 +296,6 @@ export default function NewJobPage() {
             className="mt-8 rounded-2xl border border-white/10 bg-slate-900 p-6 sm:p-8"
           >
             <div className="grid gap-6">
-
-              {/* Job title */}
               <div>
                 <label
                   htmlFor="title"
@@ -245,7 +317,6 @@ export default function NewJobPage() {
                 />
               </div>
 
-              {/* Customer */}
               <div>
                 <label
                   htmlFor="customer"
@@ -282,7 +353,6 @@ export default function NewJobPage() {
                 </select>
               </div>
 
-              {/* Description */}
               <div>
                 <label
                   htmlFor="description"
@@ -303,9 +373,7 @@ export default function NewJobPage() {
                 />
               </div>
 
-              {/* Status + date */}
               <div className="grid gap-6 sm:grid-cols-2">
-
                 <div>
                   <label
                     htmlFor="status"
@@ -362,10 +430,8 @@ export default function NewJobPage() {
                     className="w-full rounded-lg border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none focus:border-blue-500"
                   />
                 </div>
-
               </div>
 
-              {/* Address */}
               <div>
                 <label
                   htmlFor="address"
@@ -386,7 +452,6 @@ export default function NewJobPage() {
                 />
               </div>
 
-              {/* Estimated value */}
               <div>
                 <label
                   htmlFor="estimatedValue"
@@ -409,7 +474,6 @@ export default function NewJobPage() {
                 />
               </div>
 
-              {/* Notes */}
               <div>
                 <label
                   htmlFor="notes"
@@ -429,11 +493,9 @@ export default function NewJobPage() {
                   className="w-full resize-none rounded-lg border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none transition placeholder:text-slate-600 focus:border-blue-500"
                 />
               </div>
-
             </div>
 
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-
               <button
                 type="submit"
                 disabled={saving}
@@ -450,7 +512,6 @@ export default function NewJobPage() {
               >
                 Cancel
               </Link>
-
             </div>
           </form>
         )}

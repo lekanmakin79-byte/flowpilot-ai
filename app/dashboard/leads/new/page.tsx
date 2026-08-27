@@ -21,6 +21,9 @@ export default function NewLeadPage() {
 
   useEffect(() => {
     async function loadBusiness() {
+      setLoading(true);
+      setError("");
+
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -30,14 +33,17 @@ export default function NewLeadPage() {
         return;
       }
 
-      const { data: business, error } = await supabase
+      const {
+        data: business,
+        error: businessError,
+      } = await supabase
         .from("businesses")
         .select("id")
         .eq("owner_id", user.id)
         .maybeSingle();
 
-      if (error) {
-        console.error(error);
+      if (businessError) {
+        console.error(businessError);
         setError("Unable to load your business.");
         setLoading(false);
         return;
@@ -55,41 +61,115 @@ export default function NewLeadPage() {
     loadBusiness();
   }, [router]);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(
+    event: FormEvent<HTMLFormElement>
+  ) {
     event.preventDefault();
 
     setError("");
 
     if (!name.trim()) {
-      setError("Please enter the customer's name.");
+      setError(
+        "Please enter the customer's name."
+      );
+      return;
+    }
+
+    if (!businessId) {
+      setError("Business information is missing.");
       return;
     }
 
     setSaving(true);
 
-    const { error } = await supabase
-      .from("leads")
-      .insert({
-        business_id: businessId,
-        name: name.trim(),
-        email: email.trim() || null,
-        phone: phone.trim() || null,
-        description: description.trim() || null,
-        source,
-        status: "new",
-      });
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    if (error) {
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      /*
+       * Check subscription access BEFORE creating the enquiry.
+       */
+      const {
+  data: { session },
+} = await supabase.auth.getSession();
+
+if (!session?.access_token) {
+  setError("Your session has expired. Please log in again.");
+  setSaving(false);
+  return;
+}
+
+const subscriptionResponse = await fetch(
+  "/api/subscription/check",
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({
+      resource: "lead",
+    }),
+  }
+);
+
+const subscriptionResult =
+  await subscriptionResponse.json();
+
+if (
+  !subscriptionResponse.ok ||
+  !subscriptionResult.allowed
+) {
+  setError(
+    subscriptionResult.error ||
+      "Free plan limit reached. Please upgrade to Professional."
+  );
+  setSaving(false);
+  return;
+}
+
+      const { error: insertError } =
+        await supabase
+          .from("leads")
+          .insert({
+            business_id: businessId,
+            name: name.trim(),
+            email: email.trim() || null,
+            phone: phone.trim() || null,
+            description:
+              description.trim() || null,
+            source,
+            status: "new",
+          });
+
+      if (insertError) {
+        console.error(insertError);
+
+        setError(
+          "Unable to create the enquiry. Please try again."
+        );
+
+        setSaving(false);
+        return;
+      }
+
+      router.push("/dashboard/leads");
+      router.refresh();
+    } catch (error) {
       console.error(error);
+
       setError(
         "Unable to create the enquiry. Please try again."
       );
-      setSaving(false);
-      return;
-    }
 
-    router.push("/dashboard/leads");
-    router.refresh();
+      setSaving(false);
+    }
   }
 
   if (loading) {
@@ -105,7 +185,6 @@ export default function NewLeadPage() {
   return (
     <main className="min-h-screen bg-slate-950 px-6 py-10 text-white">
       <div className="mx-auto max-w-3xl">
-
         <Link
           href="/dashboard/leads"
           className="text-sm text-blue-400 hover:text-blue-300"
@@ -131,9 +210,7 @@ export default function NewLeadPage() {
           onSubmit={handleSubmit}
           className="mt-8 rounded-2xl border border-white/10 bg-slate-900 p-6"
         >
-
           <div className="grid gap-6 sm:grid-cols-2">
-
             <div className="sm:col-span-2">
               <label className="text-sm font-medium text-slate-300">
                 Customer name *
@@ -240,11 +317,9 @@ export default function NewLeadPage() {
                 className="mt-2 w-full resize-none rounded-lg border border-white/10 bg-slate-800 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-blue-500"
               />
             </div>
-
           </div>
 
           <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-
             <Link
               href="/dashboard/leads"
               className="rounded-lg border border-white/10 bg-white/5 px-5 py-3 text-center text-sm font-semibold text-slate-200 transition hover:bg-white/10"
@@ -261,11 +336,8 @@ export default function NewLeadPage() {
                 ? "Creating enquiry..."
                 : "Create enquiry"}
             </button>
-
           </div>
-
         </form>
-
       </div>
     </main>
   );

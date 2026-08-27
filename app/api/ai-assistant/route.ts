@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import Groq from "groq-sdk";
+import {
+  canUseAiAssistant,
+} from "@/lib/subscription-access";
 
 export const dynamic = "force-dynamic";
 
@@ -145,9 +148,13 @@ async function loadBusinessTable(
   businessId: string,
   limit = 50
 ) {
-  const supabaseAdmin = getSupabaseAdmin();
+  const supabaseAdmin =
+    getSupabaseAdmin();
 
-  const { data, error } = await supabaseAdmin
+  const {
+    data,
+    error,
+  } = await supabaseAdmin
     .from(tableName)
     .select("*")
     .eq("business_id", businessId)
@@ -226,11 +233,12 @@ async function loadUserBusiness(
   const {
     data,
     error,
-  } = await supabaseAdmin
-    .from("businesses")
-    .select("*")
-    .eq("owner_id", userId)
-    .maybeSingle();
+  } =
+    await supabaseAdmin
+      .from("businesses")
+      .select("*")
+      .eq("owner_id", userId)
+      .maybeSingle();
 
   if (error) {
     console.warn(
@@ -420,9 +428,6 @@ function buildBusinessContext(
  * =========================================================
  * CLEAN AI OUTPUT
  * =========================================================
- *
- * This protects the frontend from AI responses containing
- * HTML <br> tags or escaped HTML such as \<br>.
  */
 
 function cleanAIResponse(
@@ -430,58 +435,36 @@ function cleanAIResponse(
 ) {
   let cleaned = text.trim();
 
-  /*
-   * Convert common HTML line breaks to normal newlines.
-   */
   cleaned = cleaned.replace(
     /<br\s*\/?>/gi,
     "\n"
   );
 
-  /*
-   * Remove accidental escaped HTML line breaks.
-   */
   cleaned = cleaned.replace(
     /\\+<br\s*\/?>/gi,
     "\n"
   );
 
-  /*
-   * Remove paragraph HTML tags if the model
-   * accidentally produces them.
-   */
   cleaned = cleaned.replace(
     /<\/?p>/gi,
     ""
   );
 
-  /*
-   * Remove common div wrappers.
-   */
   cleaned = cleaned.replace(
     /<\/?div[^>]*>/gi,
     ""
   );
 
-  /*
-   * Convert HTML bullet entities to Markdown bullets.
-   */
   cleaned = cleaned.replace(
     /&bull;\s*/gi,
     "- "
   );
 
-  /*
-   * Convert non-breaking spaces.
-   */
   cleaned = cleaned.replace(
     /&nbsp;/gi,
     " "
   );
 
-  /*
-   * Normalise excessive blank lines.
-   */
   cleaned = cleaned.replace(
     /\n{3,}/g,
     "\n\n"
@@ -561,6 +544,40 @@ export async function POST(
         },
         {
           status: 401,
+        }
+      );
+    }
+
+    /*
+     * -----------------------------------------------------
+     * AI SUBSCRIPTION ACCESS
+     * -----------------------------------------------------
+     *
+     * IMPORTANT:
+     * This check must happen after authentication because
+     * user.id is only available after getAuthenticatedUser().
+     */
+
+    const aiAccess =
+      await canUseAiAssistant(
+        user.id
+      );
+
+    if (!aiAccess.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            aiAccess.error ||
+            "The AI Assistant requires the Professional plan.",
+          code:
+            aiAccess.code ||
+            "PROFESSIONAL_REQUIRED",
+          plan:
+            aiAccess.plan,
+        },
+        {
+          status: 403,
         }
       );
     }
@@ -790,7 +807,7 @@ BUSINESS DATA RULES
 
     Do not treat a status change alone as evidence of a
     specific communication or conversation.
-	
+
 13. When analysing an individual enquiry, clearly distinguish
     between:
 
@@ -804,8 +821,8 @@ BUSINESS DATA RULES
     Never invent contact history, conversations, appointment
     details, quotes, customer decisions, technical findings,
     or other events.
-	
-	    If the enquiry status is "contacted", do not assume that
+
+    If the enquiry status is "contacted", do not assume that
     the customer actually responded or that the contact was
     successful. The status only indicates that the business
     has marked the enquiry as contacted.
@@ -932,7 +949,6 @@ Do not provide detailed technical repair instructions.
 
 The purpose of this analysis is to help the business owner
 manage the enquiry efficiently and professionally.
-
 
 =========================================================
 CUSTOMER RESPONSE DRAFTING
