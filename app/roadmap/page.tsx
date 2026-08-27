@@ -21,7 +21,7 @@ const roadmap = [
   {
     phase: "Phase 2",
     title: "Business Foundation",
-    status: "In Progress",
+    status: "Completed",
     items: [
       "Customer Management",
       "AI Quote Generator",
@@ -32,7 +32,7 @@ const roadmap = [
   {
     phase: "Phase 3",
     title: "AI Office Manager",
-    status: "Planned",
+    status: "Completed",
     items: [
       "AI Business Assistant",
       "Smart Reminders",

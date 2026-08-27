@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -156,6 +157,13 @@ export default function OnboardingPage() {
             <p className="text-sm font-semibold tracking-wider text-blue-400">
               FLOWPILOT AI
             </p>
+			
+			<Link
+  href="/dashboard"
+  className="mb-6 inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/10 hover:text-white"
+>
+  ← Back to dashboard
+</Link>
 
             <h1 className="mt-2 text-3xl font-bold">
               Set up your business
