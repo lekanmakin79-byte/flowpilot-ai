@@ -343,24 +343,6 @@ export async function POST(
     let finalMessage =
       message.trim();
 
-    /*
-     * If the AI leaves [Your Name] in the
-     * message, replace it with the business
-     * name where available.
-     */
-    if (
-      business.name &&
-      finalMessage.includes(
-        "[Your Name]"
-      )
-    ) {
-      finalMessage =
-        finalMessage.replace(
-          /\[Your Name\]/gi,
-          business.name
-        );
-    }
-
     // ----------------------------------------
     // SEND EMAIL
     // ----------------------------------------
