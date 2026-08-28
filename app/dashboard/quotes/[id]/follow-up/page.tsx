@@ -268,22 +268,41 @@ export default function QuoteFollowUpPage() {
     setGenerating(true);
 
     try {
-      const response = await fetch(
-        "/api/ai-follow-up",
-        {
-          method: "POST",
+      const {
+  data: sessionData,
+  error: sessionError,
+} = await supabase.auth.getSession();
 
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
+if (sessionError) {
+  throw sessionError;
+}
 
-          body: JSON.stringify({
-            quoteId,
-          }),
-        }
-      );
+const accessToken =
+  sessionData.session?.access_token;
 
+if (!accessToken) {
+  router.replace("/login");
+  return;
+}
+
+const response = await fetch(
+  "/api/ai-follow-up",
+  {
+    method: "POST",
+
+    headers: {
+      "Content-Type":
+        "application/json",
+
+      Authorization:
+        `Bearer ${accessToken}`,
+    },
+
+    body: JSON.stringify({
+      quoteId,
+    }),
+  }
+);
       const data =
         await response.json();
 
