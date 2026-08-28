@@ -4,6 +4,12 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
+/*
+|--------------------------------------------------------------------------
+| ENVIRONMENT VARIABLES
+|--------------------------------------------------------------------------
+*/
+
 const stripeSecretKey =
   process.env.STRIPE_SECRET_KEY;
 
@@ -13,9 +19,21 @@ const supabaseUrl =
 const supabaseServiceRoleKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+/*
+|--------------------------------------------------------------------------
+| STRIPE
+|--------------------------------------------------------------------------
+*/
+
 const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey)
   : null;
+
+/*
+|--------------------------------------------------------------------------
+| SUPABASE ADMIN
+|--------------------------------------------------------------------------
+*/
 
 function getSupabaseAdmin() {
   if (
@@ -39,21 +57,33 @@ function getSupabaseAdmin() {
   );
 }
 
+/*
+|--------------------------------------------------------------------------
+| AUTHENTICATED USER
+|--------------------------------------------------------------------------
+*/
+
 async function getAuthenticatedUser(
   request: Request
 ) {
   const authorization =
-    request.headers.get("authorization");
+    request.headers.get(
+      "authorization"
+    );
 
   if (
     !authorization ||
-    !authorization.startsWith("Bearer ")
+    !authorization.startsWith(
+      "Bearer "
+    )
   ) {
     return null;
   }
 
   const token =
-    authorization.substring(7).trim();
+    authorization
+      .substring(7)
+      .trim();
 
   if (!token) {
     return null;
@@ -77,10 +107,22 @@ async function getAuthenticatedUser(
   return user;
 }
 
+/*
+|--------------------------------------------------------------------------
+| POST
+|--------------------------------------------------------------------------
+*/
+
 export async function POST(
   request: Request
 ) {
   try {
+    /*
+     * ---------------------------------------------------------------
+     * STRIPE CONFIGURATION
+     * ---------------------------------------------------------------
+     */
+
     if (!stripe) {
       return NextResponse.json(
         {
@@ -92,6 +134,12 @@ export async function POST(
         }
       );
     }
+
+    /*
+     * ---------------------------------------------------------------
+     * AUTHENTICATION
+     * ---------------------------------------------------------------
+     */
 
     const user =
       await getAuthenticatedUser(
@@ -110,19 +158,40 @@ export async function POST(
       );
     }
 
+    /*
+     * ---------------------------------------------------------------
+     * SUPABASE
+     * ---------------------------------------------------------------
+     */
+
     const supabase =
       getSupabaseAdmin();
 
+    /*
+     * ---------------------------------------------------------------
+     * LOAD USER SUBSCRIPTION
+     * ---------------------------------------------------------------
+     */
+
     const {
       data: subscription,
-      error: subscriptionError,
+      error:
+        subscriptionError,
     } =
       await supabase
         .from("subscriptions")
         .select(
-          "stripe_customer_id, stripe_subscription_id, status"
+          `
+            stripe_customer_id,
+            stripe_subscription_id,
+            plan,
+            status
+          `
         )
-        .eq("user_id", user.id)
+        .eq(
+          "user_id",
+          user.id
+        )
         .maybeSingle();
 
     if (subscriptionError) {
@@ -142,6 +211,12 @@ export async function POST(
       );
     }
 
+    /*
+     * ---------------------------------------------------------------
+     * NO SUBSCRIPTION
+     * ---------------------------------------------------------------
+     */
+
     if (!subscription) {
       return NextResponse.json(
         {
@@ -154,7 +229,15 @@ export async function POST(
       );
     }
 
-    if (!subscription.stripe_customer_id) {
+    /*
+     * ---------------------------------------------------------------
+     * STRIPE CUSTOMER REQUIRED
+     * ---------------------------------------------------------------
+     */
+
+    if (
+      !subscription.stripe_customer_id
+    ) {
       return NextResponse.json(
         {
           error:
@@ -166,10 +249,24 @@ export async function POST(
       );
     }
 
+    /*
+     * ---------------------------------------------------------------
+     * ORIGIN
+     * ---------------------------------------------------------------
+     */
+
     const origin =
-      request.headers.get("origin") ||
+      request.headers.get(
+        "origin"
+      ) ||
       process.env.NEXT_PUBLIC_APP_URL ||
       "http://localhost:3000";
+
+    /*
+     * ---------------------------------------------------------------
+     * CREATE CUSTOMER PORTAL SESSION
+     * ---------------------------------------------------------------
+     */
 
     const portalSession =
       await stripe.billingPortal.sessions.create(
@@ -182,10 +279,19 @@ export async function POST(
         }
       );
 
-    return NextResponse.json({
-      success: true,
-      url: portalSession.url,
-    });
+    /*
+     * ---------------------------------------------------------------
+     * SUCCESS
+     * ---------------------------------------------------------------
+     */
+
+    return NextResponse.json(
+      {
+        success: true,
+        url:
+          portalSession.url,
+      }
+    );
   } catch (error: any) {
     console.error(
       "Stripe customer portal error:",

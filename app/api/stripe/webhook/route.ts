@@ -133,8 +133,8 @@ function stripeTimestampToISO(
 | SUBSCRIPTION PERIOD INFORMATION
 |--------------------------------------------------------------------------
 |
-| Stripe now exposes subscription billing period information on the
-| subscription item.
+| Stripe exposes subscription billing period information
+| on the subscription item.
 |
 |--------------------------------------------------------------------------
 */
@@ -168,19 +168,14 @@ function getSubscriptionPeriod(
 |
 | IMPORTANT:
 |
-| Stripe can represent a scheduled cancellation in more than one way.
+| Stripe can represent a scheduled cancellation in
+| more than one way.
 |
 | 1. cancel_at_period_end = true
 |
 | 2. cancel_at contains a future timestamp
 |
-| Your Stripe Customer Portal event showed:
-|
-| cancel_at_period_end = false
-|
-| cancel_at = 1790287090
-|
-| Therefore we must check BOTH.
+| Therefore we check BOTH.
 |
 |--------------------------------------------------------------------------
 */
@@ -484,7 +479,7 @@ async function saveSubscription(
      * cancellation state here instead of
      * relying only on cancel_at_period_end.
      *
-     * This fixes the situation where Stripe
+     * This handles the situation where Stripe
      * sends:
      *
      * cancel_at_period_end = false
@@ -1063,10 +1058,7 @@ export async function POST(
        * SUBSCRIPTION UPDATED
        * ==================================================
        *
-       * THIS IS THE MOST IMPORTANT EVENT FOR YOUR
-       * CURRENT CANCELLATION PROBLEM.
-       *
-       * It handles:
+       * Handles:
        *
        * - cancellation requests
        * - cancel_at_period_end
@@ -1149,10 +1141,7 @@ export async function POST(
        * SUBSCRIPTION DELETED
        * ==================================================
        *
-       * This normally means the subscription has actually
-       * ended.
-       *
-       * IMPORTANT:
+       * This means the subscription has actually ended.
        *
        * A customer who merely schedules cancellation
        * should NOT reach this state yet.

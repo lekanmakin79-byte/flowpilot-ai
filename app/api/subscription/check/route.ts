@@ -1,106 +1,187 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import {
-  checkFeatureAccess,
-  type Feature,
-} from "@/lib/subscription-access";
+import { checkFeatureAccess } from "@/lib/subscription-access";
+import type { Feature } from "@/lib/subscription-access";
+import { VALID_FEATURES } from "@/lib/subscription-access";
+
+export const dynamic = "force-dynamic";
+
+/*
+|--------------------------------------------------------------------------
+| POST
+|--------------------------------------------------------------------------
+*/
 
 export async function POST(
   request: Request
 ) {
   try {
+    /*
+     * ---------------------------------------------------------------
+     * READ REQUEST BODY
+     * ---------------------------------------------------------------
+     */
+
     const body =
       await request.json();
 
     const feature =
-      body?.feature as Feature;
+      body?.feature as
+        | Feature
+        | undefined;
 
     const businessId =
       body?.businessId as
         | string
         | undefined;
 
-    const validFeatures: Feature[] = [
-      "ai_follow_up",
-      "ai_assistant",
-      "customer",
-      "lead",
-      "job",
-      "quote",
-      "invoice",
-    ];
+    /*
+     * ---------------------------------------------------------------
+     * FEATURE VALIDATION
+     * ---------------------------------------------------------------
+     */
 
     if (
       !feature ||
-      !validFeatures.includes(feature)
+      !VALID_FEATURES.includes(
+        feature
+      )
     ) {
       return NextResponse.json(
         {
           allowed: false,
+          plan: "free",
+          limit: null,
+          current: 0,
+          remaining: null,
           code: "INVALID_FEATURE",
           error:
             "Invalid subscription feature.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
     /*
-     * Read the user's Supabase access token
-     * from the Authorization header.
+     * ---------------------------------------------------------------
+     * AUTHORIZATION HEADER
+     * ---------------------------------------------------------------
      */
-    const authorization =
-      request.headers.get("authorization");
 
-    if (!authorization) {
+    const authorization =
+      request.headers.get(
+        "authorization"
+      );
+
+    if (
+      !authorization ||
+      !authorization.startsWith(
+        "Bearer "
+      )
+    ) {
       return NextResponse.json(
         {
           allowed: false,
+          plan: "free",
+          limit: null,
+          current: 0,
+          remaining: null,
           code: "UNAUTHENTICATED",
           error:
             "You must be signed in to continue.",
         },
-        { status: 401 }
+        {
+          status: 401,
+        }
       );
     }
 
+    /*
+     * ---------------------------------------------------------------
+     * ACCESS TOKEN
+     * ---------------------------------------------------------------
+     */
+
     const accessToken =
-      authorization.replace(
-        /^Bearer\s+/i,
-        ""
-      ).trim();
+      authorization
+        .replace(
+          /^Bearer\s+/i,
+          ""
+        )
+        .trim();
 
     if (!accessToken) {
       return NextResponse.json(
         {
           allowed: false,
+          plan: "free",
+          limit: null,
+          current: 0,
+          remaining: null,
           code: "UNAUTHENTICATED",
           error:
             "You must be signed in to continue.",
         },
-        { status: 401 }
+        {
+          status: 401,
+        }
       );
     }
 
     /*
-     * Use the Supabase service-role client only
-     * on the server to validate the user's token.
+     * ---------------------------------------------------------------
+     * SERVER SUPABASE CONFIGURATION
+     * ---------------------------------------------------------------
      */
-    const url =
+
+    const supabaseUrl =
       process.env.NEXT_PUBLIC_SUPABASE_URL;
 
     const serviceRoleKey =
       process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    if (!url || !serviceRoleKey) {
-      throw new Error(
-        "Supabase server configuration is missing."
+    if (
+      !supabaseUrl ||
+      !serviceRoleKey
+    ) {
+      console.error(
+        "Missing Supabase server configuration."
+      );
+
+      return NextResponse.json(
+        {
+          allowed: false,
+          plan: "free",
+          limit: null,
+          current: 0,
+          remaining: null,
+          code:
+            "SERVER_CONFIGURATION_ERROR",
+          error:
+            "Subscription service is not configured correctly.",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
+    /*
+     * ---------------------------------------------------------------
+     * SERVER SUPABASE CLIENT
+     * ---------------------------------------------------------------
+     */
+
+    const {
+      createClient,
+    } = await import(
+      "@supabase/supabase-js"
+    );
+
     const supabase =
       createClient(
-        url,
+        supabaseUrl,
         serviceRoleKey,
         {
           auth: {
@@ -111,13 +192,17 @@ export async function POST(
       );
 
     /*
-     * Explicitly validate the access token.
+     * ---------------------------------------------------------------
+     * VERIFY AUTHENTICATED USER
+     * ---------------------------------------------------------------
      */
+
     const {
       data: {
         user,
       },
-      error: userError,
+      error:
+        userError,
     } =
       await supabase.auth.getUser(
         accessToken
@@ -135,25 +220,88 @@ export async function POST(
       return NextResponse.json(
         {
           allowed: false,
-          code: "UNAUTHENTICATED",
+          plan: "free",
+          limit: null,
+          current: 0,
+          remaining: null,
+          code:
+            "UNAUTHENTICATED",
           error:
             "Your session has expired. Please sign in again.",
         },
-        { status: 401 }
+        {
+          status: 401,
+        }
       );
     }
 
     /*
-     * Check the requested subscription feature.
+     * ---------------------------------------------------------------
+     * BUSINESS VALIDATION
+     * ---------------------------------------------------------------
+     *
+     * AI features DO NOT require businessId.
+     *
+     * Record features DO require businessId.
+     *
+     * checkFeatureAccess() performs the final ownership check.
+     *
+     * ---------------------------------------------------------------
      */
+
+    const isAIFeature =
+      feature ===
+        "ai_follow_up" ||
+      feature ===
+        "ai_assistant";
+
+    if (
+      !isAIFeature &&
+      (
+        !businessId ||
+        typeof businessId !== "string"
+      )
+    ) {
+      return NextResponse.json(
+        {
+          allowed: false,
+          plan: "free",
+          limit: null,
+          current: 0,
+          remaining: null,
+          code:
+            "INVALID_BUSINESS",
+          error:
+            "Business information is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /*
+     * ---------------------------------------------------------------
+     * FINAL ACCESS CHECK
+     * ---------------------------------------------------------------
+     */
+
     const access =
       await checkFeatureAccess(
         user.id,
         feature,
         {
-          businessId,
+          businessId:
+            businessId ||
+            undefined,
         }
       );
+
+    /*
+     * ---------------------------------------------------------------
+     * RESPONSE
+     * ---------------------------------------------------------------
+     */
 
     return NextResponse.json(
       access
@@ -167,14 +315,20 @@ export async function POST(
     return NextResponse.json(
       {
         allowed: false,
+        plan: "free",
+        limit: null,
+        current: 0,
+        remaining: null,
         code:
-          "SUBSCRIPTION_CHECK_ERROR",
+          "SUBSCRIPTION_LOOKUP_ERROR",
         error:
           error instanceof Error
             ? error.message
             : "Unable to verify subscription access.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }

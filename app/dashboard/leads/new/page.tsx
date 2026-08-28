@@ -2,8 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 export default function NewLeadPage() {
   const router = useRouter();
@@ -20,32 +20,39 @@ export default function NewLeadPage() {
   const [source, setSource] = useState("manual");
 
   useEffect(() => {
+    let mounted = true;
+
     async function loadBusiness() {
       setLoading(true);
       setError("");
 
       const {
         data: { user },
+        error: userError,
       } = await supabase.auth.getUser();
 
-      if (!user) {
-        router.replace("/login");
+      if (userError || !user) {
+        if (mounted) {
+          router.replace("/login");
+        }
         return;
       }
 
-      const {
-        data: business,
-        error: businessError,
-      } = await supabase
-        .from("businesses")
-        .select("id")
-        .eq("owner_id", user.id)
-        .maybeSingle();
+      const { data: business, error: businessError } =
+        await supabase
+          .from("businesses")
+          .select("id")
+          .eq("owner_id", user.id)
+          .maybeSingle();
 
       if (businessError) {
         console.error(businessError);
-        setError("Unable to load your business.");
-        setLoading(false);
+
+        if (mounted) {
+          setError("Unable to load your business.");
+          setLoading(false);
+        }
+
         return;
       }
 
@@ -54,24 +61,31 @@ export default function NewLeadPage() {
         return;
       }
 
-      setBusinessId(business.id);
-      setLoading(false);
+      if (mounted) {
+        setBusinessId(business.id);
+        setLoading(false);
+      }
     }
 
     loadBusiness();
+
+    return () => {
+      mounted = false;
+    };
   }, [router]);
 
-  async function handleSubmit(
-    event: FormEvent<HTMLFormElement>
-  ) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     setError("");
 
-    if (!name.trim()) {
-      setError(
-        "Please enter the customer's name."
-      );
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    const trimmedPhone = phone.trim();
+    const trimmedDescription = description.trim();
+
+    if (!trimmedName) {
+      setError("Please enter the customer's name.");
       return;
     }
 
@@ -84,10 +98,12 @@ export default function NewLeadPage() {
 
     try {
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      if (!user) {
+      if (!session?.access_token) {
+        setError("Your session has expired. Please sign in again.");
+        setSaving(false);
         router.replace("/login");
         return;
       }
@@ -95,58 +111,56 @@ export default function NewLeadPage() {
       /*
        * Check subscription access BEFORE creating the enquiry.
        */
-      const {
-  data: { session },
-} = await supabase.auth.getSession();
+      const subscriptionResponse = await fetch(
+        "/api/subscription/check",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            feature: "lead",
+            businessId,
+          }),
+        }
+      );
 
-if (!session?.access_token) {
-  setError("Your session has expired. Please log in again.");
-  setSaving(false);
-  return;
-}
+      let access: {
+        allowed?: boolean;
+        error?: string;
+        code?: string;
+      };
 
-const subscriptionResponse = await fetch(
-  "/api/subscription/check",
-  {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    body: JSON.stringify({
-      resource: "lead",
-    }),
-  }
-);
+      try {
+        access = await subscriptionResponse.json();
+      } catch {
+        access = {
+          allowed: false,
+          error: "Unable to verify subscription access.",
+        };
+      }
 
-const subscriptionResult =
-  await subscriptionResponse.json();
+      if (!subscriptionResponse.ok || !access.allowed) {
+        setError(
+          access.error ||
+            "Free plan limit reached. Please upgrade to Professional."
+        );
+        setSaving(false);
+        return;
+      }
 
-if (
-  !subscriptionResponse.ok ||
-  !subscriptionResult.allowed
-) {
-  setError(
-    subscriptionResult.error ||
-      "Free plan limit reached. Please upgrade to Professional."
-  );
-  setSaving(false);
-  return;
-}
-
-      const { error: insertError } =
-        await supabase
-          .from("leads")
-          .insert({
-            business_id: businessId,
-            name: name.trim(),
-            email: email.trim() || null,
-            phone: phone.trim() || null,
-            description:
-              description.trim() || null,
-            source,
-            status: "new",
-          });
+      const { error: insertError } = await supabase
+        .from("leads")
+        .insert({
+          business_id: businessId,
+          name: trimmedName,
+          email: trimmedEmail || null,
+          phone: trimmedPhone || null,
+          description: trimmedDescription || null,
+          source,
+          status: "new",
+        });
 
       if (insertError) {
         console.error(insertError);
@@ -154,7 +168,6 @@ if (
         setError(
           "Unable to create the enquiry. Please try again."
         );
-
         setSaving(false);
         return;
       }
@@ -175,9 +188,7 @@ if (
   if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
-        <p className="text-slate-400">
-          Loading...
-        </p>
+        <p className="text-slate-400">Loading...</p>
       </main>
     );
   }
@@ -187,18 +198,18 @@ if (
       <div className="mx-auto max-w-3xl">
         <Link
           href="/dashboard/leads"
-          className="text-sm text-blue-400 hover:text-blue-300"
+          className="text-sm text-blue-400 transition hover:text-blue-300"
         >
           ← Back to enquiries
         </Link>
 
-        <h1 className="mt-4 text-4xl font-bold">
-          New Enquiry
-        </h1>
+        <div className="mt-4">
+          <h1 className="text-4xl font-bold">New Enquiry</h1>
 
-        <p className="mt-2 text-slate-400">
-          Add a new customer enquiry to your sales pipeline.
-        </p>
+          <p className="mt-2 text-slate-400">
+            Add a new customer enquiry to your sales pipeline.
+          </p>
+        </div>
 
         {error && (
           <div className="mt-6 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300">
@@ -212,102 +223,97 @@ if (
         >
           <div className="grid gap-6 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <label className="text-sm font-medium text-slate-300">
+              <label
+                htmlFor="name"
+                className="text-sm font-medium text-slate-300"
+              >
                 Customer name *
               </label>
 
               <input
+                id="name"
                 type="text"
                 value={name}
-                onChange={(event) =>
-                  setName(event.target.value)
-                }
+                onChange={(event) => setName(event.target.value)}
                 placeholder="e.g. Sarah Jones"
                 required
+                autoComplete="name"
                 className="mt-2 w-full rounded-lg border border-white/10 bg-slate-800 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-blue-500"
               />
             </div>
 
             <div>
-              <label className="text-sm font-medium text-slate-300">
+              <label
+                htmlFor="email"
+                className="text-sm font-medium text-slate-300"
+              >
                 Email
               </label>
 
               <input
+                id="email"
                 type="email"
                 value={email}
-                onChange={(event) =>
-                  setEmail(event.target.value)
-                }
+                onChange={(event) => setEmail(event.target.value)}
                 placeholder="customer@example.com"
+                autoComplete="email"
                 className="mt-2 w-full rounded-lg border border-white/10 bg-slate-800 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-blue-500"
               />
             </div>
 
             <div>
-              <label className="text-sm font-medium text-slate-300">
+              <label
+                htmlFor="phone"
+                className="text-sm font-medium text-slate-300"
+              >
                 Phone
               </label>
 
               <input
+                id="phone"
                 type="tel"
                 value={phone}
-                onChange={(event) =>
-                  setPhone(event.target.value)
-                }
+                onChange={(event) => setPhone(event.target.value)}
                 placeholder="07700 000000"
+                autoComplete="tel"
                 className="mt-2 w-full rounded-lg border border-white/10 bg-slate-800 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-blue-500"
               />
             </div>
 
             <div>
-              <label className="text-sm font-medium text-slate-300">
+              <label
+                htmlFor="source"
+                className="text-sm font-medium text-slate-300"
+              >
                 Source
               </label>
 
               <select
+                id="source"
                 value={source}
-                onChange={(event) =>
-                  setSource(event.target.value)
-                }
+                onChange={(event) => setSource(event.target.value)}
                 className="mt-2 w-full rounded-lg border border-white/10 bg-slate-800 px-4 py-3 text-white outline-none focus:border-blue-500"
               >
-                <option value="manual">
-                  Manual
-                </option>
-
-                <option value="website">
-                  Website
-                </option>
-
-                <option value="phone">
-                  Phone
-                </option>
-
-                <option value="email">
-                  Email
-                </option>
-
-                <option value="referral">
-                  Referral
-                </option>
-
-                <option value="social">
-                  Social media
-                </option>
-
-                <option value="other">
-                  Other
-                </option>
+                <option value="manual">Manual</option>
+                <option value="website">Website</option>
+                <option value="phone">Phone</option>
+                <option value="email">Email</option>
+                <option value="referral">Referral</option>
+                <option value="social">Social media</option>
+                <option value="other">Other</option>
               </select>
             </div>
 
             <div className="sm:col-span-2">
-              <label className="text-sm font-medium text-slate-300">
+              <label
+                htmlFor="description"
+                className="text-sm font-medium text-slate-300"
+              >
                 Enquiry details
               </label>
 
               <textarea
+                id="description"
                 value={description}
                 onChange={(event) =>
                   setDescription(event.target.value)
@@ -332,9 +338,7 @@ if (
               disabled={saving}
               className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {saving
-                ? "Creating enquiry..."
-                : "Create enquiry"}
+              {saving ? "Creating enquiry..." : "Create enquiry"}
             </button>
           </div>
         </form>

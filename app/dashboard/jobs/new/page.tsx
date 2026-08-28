@@ -2,8 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
 type Customer = {
   id: string;
@@ -36,32 +36,39 @@ export default function NewJobPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    let mounted = true;
+
     async function loadFormData() {
       setLoading(true);
       setError("");
 
       const {
         data: { user },
+        error: userError,
       } = await supabase.auth.getUser();
 
-      if (!user) {
-        router.replace("/login");
+      if (userError || !user) {
+        if (mounted) {
+          router.replace("/login");
+        }
         return;
       }
 
-      const {
-        data: businessData,
-        error: businessError,
-      } = await supabase
-        .from("businesses")
-        .select("id")
-        .eq("owner_id", user.id)
-        .maybeSingle();
+      const { data: businessData, error: businessError } =
+        await supabase
+          .from("businesses")
+          .select("id")
+          .eq("owner_id", user.id)
+          .maybeSingle();
 
       if (businessError) {
         console.error(businessError);
-        setError("Unable to load your business.");
-        setLoading(false);
+
+        if (mounted) {
+          setError("Unable to load your business.");
+          setLoading(false);
+        }
+
         return;
       }
 
@@ -70,34 +77,41 @@ export default function NewJobPage() {
         return;
       }
 
-      setBusiness(businessData);
-
-      const {
-        data: customerData,
-        error: customerError,
-      } = await supabase
-        .from("customers")
-        .select(
-          "id, first_name, last_name, company_name"
-        )
-        .eq("business_id", businessData.id)
-        .eq("status", "active")
-        .order("first_name", {
-          ascending: true,
-        });
+      const { data: customerData, error: customerError } =
+        await supabase
+          .from("customers")
+          .select(
+            "id, first_name, last_name, company_name"
+          )
+          .eq("business_id", businessData.id)
+          .eq("status", "active")
+          .order("first_name", {
+            ascending: true,
+          });
 
       if (customerError) {
         console.error(customerError);
-        setError("Unable to load customers.");
-        setLoading(false);
+
+        if (mounted) {
+          setError("Unable to load customers.");
+          setLoading(false);
+        }
+
         return;
       }
 
-      setCustomers(customerData ?? []);
-      setLoading(false);
+      if (mounted) {
+        setBusiness(businessData);
+        setCustomers(customerData ?? []);
+        setLoading(false);
+      }
     }
 
     loadFormData();
+
+    return () => {
+      mounted = false;
+    };
   }, [router]);
 
   async function handleSubmit(
@@ -129,7 +143,7 @@ export default function NewJobPage() {
 
     if (
       parsedValue !== null &&
-      (Number.isNaN(parsedValue) || parsedValue < 0)
+      (!Number.isFinite(parsedValue) || parsedValue < 0)
     ) {
       setError(
         "Estimated value must be a valid positive number."
@@ -141,10 +155,14 @@ export default function NewJobPage() {
 
     try {
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      if (!user) {
+      if (!session?.access_token) {
+        setError(
+          "Your session has expired. Please sign in again."
+        );
+        setSaving(false);
         router.replace("/login");
         return;
       }
@@ -152,78 +170,77 @@ export default function NewJobPage() {
       /*
        * Check subscription access BEFORE creating the job.
        */
-      const {
-  data: { session },
-} = await supabase.auth.getSession();
+      const subscriptionResponse = await fetch(
+        "/api/subscription/check",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            feature: "job",
+            businessId: business.id,
+          }),
+        }
+      );
 
-if (!session?.access_token) {
-  setError("Your session has expired. Please log in again.");
-  setSaving(false);
-  return;
-}
+      let access: {
+        allowed?: boolean;
+        error?: string;
+        code?: string;
+      };
 
-const subscriptionResponse = await fetch(
-  "/api/subscription/check",
-  {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    body: JSON.stringify({
-      resource: "job",
-    }),
-  }
-);
+      try {
+        access = await subscriptionResponse.json();
+      } catch {
+        access = {
+          allowed: false,
+          error: "Unable to verify subscription access.",
+        };
+      }
 
-const subscriptionResult =
-  await subscriptionResponse.json();
-
-if (
-  !subscriptionResponse.ok ||
-  !subscriptionResult.allowed
-) {
-  setError(
-    subscriptionResult.error ||
-      "Free plan limit reached. Please upgrade to Professional."
-  );
-  setSaving(false);
-  return;
-}
-
-      const {
-        data,
-        error: insertError,
-      } = await supabase
-        .from("jobs")
-        .insert({
-          business_id: business.id,
-          customer_id: customerId,
-          title: title.trim(),
-          description:
-            description.trim() || null,
-          status,
-          scheduled_date:
-            scheduledDate || null,
-          address:
-            address.trim() || null,
-          estimated_value: parsedValue,
-          notes:
-            notes.trim() || null,
-        })
-        .select("id")
-        .single();
-
-      if (insertError) {
-        console.error(insertError);
-        setError(insertError.message);
+      if (
+        !subscriptionResponse.ok ||
+        !access.allowed
+      ) {
+        setError(
+          access.error ||
+            "Free plan limit reached. Please upgrade to Professional."
+        );
         setSaving(false);
         return;
       }
 
-      router.push(
-        `/dashboard/jobs/${data.id}`
-      );
+      const { data, error: insertError } =
+        await supabase
+          .from("jobs")
+          .insert({
+            business_id: business.id,
+            customer_id: customerId,
+            title: title.trim(),
+            description: description.trim() || null,
+            status,
+            scheduled_date: scheduledDate || null,
+            address: address.trim() || null,
+            estimated_value: parsedValue,
+            notes: notes.trim() || null,
+          })
+          .select("id")
+          .single();
+
+      if (insertError) {
+        console.error(insertError);
+
+        setError(
+          "Unable to create the job. Please try again."
+        );
+        setSaving(false);
+        return;
+      }
+
+      router.push(`/dashboard/jobs/${data.id}`);
+      router.refresh();
     } catch (error) {
       console.error(error);
 
@@ -279,8 +296,8 @@ if (
             </h2>
 
             <p className="mt-2 text-sm text-yellow-100/70">
-              Create an active customer before creating a
-              job.
+              Create an active customer before creating
+              a job.
             </p>
 
             <Link
@@ -390,22 +407,16 @@ if (
                     }
                     className="w-full rounded-lg border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none focus:border-blue-500"
                   >
-                    <option value="draft">
-                      Draft
-                    </option>
-
+                    <option value="draft">Draft</option>
                     <option value="scheduled">
                       Scheduled
                     </option>
-
                     <option value="in_progress">
                       In progress
                     </option>
-
                     <option value="completed">
                       Completed
                     </option>
-
                     <option value="cancelled">
                       Cancelled
                     </option>
@@ -457,7 +468,7 @@ if (
                   htmlFor="estimatedValue"
                   className="mb-2 block text-sm font-medium"
                 >
-                  Estimated value
+                  Estimated value (£)
                 </label>
 
                 <input
@@ -501,9 +512,7 @@ if (
                 disabled={saving}
                 className="rounded-lg bg-blue-600 px-6 py-3 font-semibold transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {saving
-                  ? "Creating job..."
-                  : "Create job"}
+                {saving ? "Creating job..." : "Create job"}
               </button>
 
               <Link

@@ -40,53 +40,48 @@ type SubscriptionAccessResponse = {
   error?: string;
 };
 
+type CreateInvoiceResponse = {
+  success?: boolean;
+  invoice?: {
+    id: string;
+  };
+  error?: string;
+  code?: string;
+  remaining?: number | null;
+};
+
 export default function NewInvoicePage() {
   const router = useRouter();
 
-  const [customers, setCustomers] = useState<Customer[]>(
-    []
-  );
-
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
 
   const [businessId, setBusinessId] = useState("");
-
   const [customerId, setCustomerId] = useState("");
-
   const [jobId, setJobId] = useState("");
 
-  const [invoiceNumber, setInvoiceNumber] =
-    useState("");
-
+  const [invoiceNumber, setInvoiceNumber] = useState("");
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
 
-  const [description, setDescription] =
-    useState("");
-
-  const [items, setItems] =
-    useState<InvoiceItem[]>([
-      {
-        id: crypto.randomUUID(),
-        description: "",
-        quantity: "1",
-        unit_price: "",
-      },
-    ]);
+  const [items, setItems] = useState<InvoiceItem[]>([
+    {
+      id: crypto.randomUUID(),
+      description: "",
+      quantity: "1",
+      unit_price: "",
+    },
+  ]);
 
   const [tax, setTax] = useState("");
-
   const [dueDate, setDueDate] = useState("");
-
   const [notes, setNotes] = useState("");
 
   const [loading, setLoading] = useState(true);
-
   const [saving, setSaving] = useState(false);
 
   const [error, setError] = useState("");
-
-  const [limitMessage, setLimitMessage] =
-    useState("");
+  const [limitMessage, setLimitMessage] = useState("");
 
   const [remainingInvoices, setRemainingInvoices] =
     useState<number | null>(null);
@@ -98,6 +93,12 @@ export default function NewInvoicePage() {
         setError("");
         setLimitMessage("");
 
+        /*
+         * --------------------------------------------------
+         * 1. Get authenticated user
+         * --------------------------------------------------
+         */
+
         const {
           data: { user },
         } = await supabase.auth.getUser();
@@ -106,6 +107,12 @@ export default function NewInvoicePage() {
           router.replace("/login");
           return;
         }
+
+        /*
+         * --------------------------------------------------
+         * 2. Load user's business
+         * --------------------------------------------------
+         */
 
         const {
           data: business,
@@ -129,19 +136,30 @@ export default function NewInvoicePage() {
         setBusinessId(business.id);
 
         /*
-         * Check subscription access before
-         * allowing invoice creation.
-         *
-         * This is only the initial page check.
-         * The limit is checked again immediately
-         * before the invoice is inserted.
+         * --------------------------------------------------
+         * 3. Check invoice subscription access
+         * --------------------------------------------------
          */
+
+        const {
+          data: sessionData,
+        } = await supabase.auth.getSession();
+
+        const accessToken =
+          sessionData.session?.access_token;
+
+        if (!accessToken) {
+          router.replace("/login");
+          return;
+        }
+
         const accessResponse = await fetch(
           "/api/subscription/check",
           {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
             },
             body: JSON.stringify({
               feature: "invoice",
@@ -150,39 +168,40 @@ export default function NewInvoicePage() {
           }
         );
 
-        let access: SubscriptionAccessResponse =
-          {};
+        let access: SubscriptionAccessResponse = {};
 
         try {
           access = await accessResponse.json();
         } catch (jsonError) {
           console.error(
-            "Subscription access response parsing error:",
+            "Subscription response parsing error:",
             jsonError
           );
         }
 
-        if (
-          !accessResponse.ok ||
-          !access.allowed
-        ) {
-          setLimitMessage(
-            access.error ||
-              "You have reached your invoice limit."
-          );
-
+        if (!accessResponse.ok || !access.allowed) {
           if (
-            access.code ===
-            "UNAUTHENTICATED"
+            access.code === "UNAUTHENTICATED"
           ) {
             router.replace("/login");
             return;
           }
+
+          setLimitMessage(
+            access.error ||
+              "You have reached your invoice limit."
+          );
         } else {
           setRemainingInvoices(
             access.remaining ?? null
           );
         }
+
+        /*
+         * --------------------------------------------------
+         * 4. Load customers
+         * --------------------------------------------------
+         */
 
         const {
           data: customerData,
@@ -192,10 +211,7 @@ export default function NewInvoicePage() {
           .select(
             "id, first_name, last_name, company_name"
           )
-          .eq(
-            "business_id",
-            business.id
-          )
+          .eq("business_id", business.id)
           .order("first_name", {
             ascending: true,
           });
@@ -214,6 +230,12 @@ export default function NewInvoicePage() {
           return;
         }
 
+        /*
+         * --------------------------------------------------
+         * 5. Load jobs
+         * --------------------------------------------------
+         */
+
         const {
           data: jobData,
           error: jobError,
@@ -222,10 +244,7 @@ export default function NewInvoicePage() {
           .select(
             "id, title, customer_id, estimated_value"
           )
-          .eq(
-            "business_id",
-            business.id
-          )
+          .eq("business_id", business.id)
           .order("created_at", {
             ascending: false,
           });
@@ -244,22 +263,16 @@ export default function NewInvoicePage() {
           return;
         }
 
-        setCustomers(
-          customerData ?? []
-        );
-
-        setJobs(
-          jobData ?? []
-        );
+        setCustomers(customerData ?? []);
+        setJobs(jobData ?? []);
 
         /*
-         * Generate invoice number.
-         *
-         * Example:
-         * INV-2026-0001
+         * --------------------------------------------------
+         * 6. Generate invoice number
+         * --------------------------------------------------
          */
-        const year =
-          new Date().getFullYear();
+
+        const year = new Date().getFullYear();
 
         const {
           count,
@@ -270,10 +283,7 @@ export default function NewInvoicePage() {
             count: "exact",
             head: true,
           })
-          .eq(
-            "business_id",
-            business.id
-          );
+          .eq("business_id", business.id);
 
         if (countError) {
           console.error(
@@ -282,13 +292,13 @@ export default function NewInvoicePage() {
           );
         }
 
-        const nextNumber =
-          (count ?? 0) + 1;
+        const nextNumber = (count ?? 0) + 1;
 
         setInvoiceNumber(
-          `INV-${year}-${String(
-            nextNumber
-          ).padStart(4, "0")}`
+          `INV-${year}-${String(nextNumber).padStart(
+            4,
+            "0"
+          )}`
         );
       } catch (loadError) {
         console.error(
@@ -309,13 +319,24 @@ export default function NewInvoicePage() {
     loadFormData();
   }, [router]);
 
+  /*
+   * --------------------------------------------------
+   * Filter jobs by selected customer
+   * --------------------------------------------------
+   */
+
   const filteredJobs = customerId
     ? jobs.filter(
         (job) =>
-          job.customer_id ===
-          customerId
+          job.customer_id === customerId
       )
     : [];
+
+  /*
+   * --------------------------------------------------
+   * Calculate subtotal for display
+   * --------------------------------------------------
+   */
 
   const subtotal = useMemo(() => {
     return items.reduce(
@@ -335,11 +356,15 @@ export default function NewInvoicePage() {
     );
   }, [items]);
 
-  const taxNumber =
-    Number(tax) || 0;
+  const taxNumber = Number(tax) || 0;
 
-  const total =
-    subtotal + taxNumber;
+  const total = subtotal + taxNumber;
+
+  /*
+   * --------------------------------------------------
+   * Customer change
+   * --------------------------------------------------
+   */
 
   function handleCustomerChange(
     value: string
@@ -350,110 +375,99 @@ export default function NewInvoicePage() {
       jobs.some(
         (job) =>
           job.id === jobId &&
-          job.customer_id ===
-            value
+          job.customer_id === value
       );
 
-    if (
-      !selectedJobStillMatches
-    ) {
+    if (!selectedJobStillMatches) {
       setJobId("");
     }
   }
 
+  /*
+   * --------------------------------------------------
+   * Add invoice item
+   * --------------------------------------------------
+   */
+
   function addItem() {
-    setItems(
-      (currentItems) => [
-        ...currentItems,
-        {
-          id: crypto.randomUUID(),
-          description: "",
-          quantity: "1",
-          unit_price: "",
-        },
-      ]
-    );
+    setItems((currentItems) => [
+      ...currentItems,
+      {
+        id: crypto.randomUUID(),
+        description: "",
+        quantity: "1",
+        unit_price: "",
+      },
+    ]);
   }
 
-  function removeItem(
-    id: string
-  ) {
+  /*
+   * --------------------------------------------------
+   * Remove invoice item
+   * --------------------------------------------------
+   */
+
+  function removeItem(id: string) {
     if (items.length === 1) {
       return;
     }
 
-    setItems(
-      (currentItems) =>
-        currentItems.filter(
-          (item) =>
-            item.id !== id
-        )
+    setItems((currentItems) =>
+      currentItems.filter(
+        (item) => item.id !== id
+      )
     );
   }
+
+  /*
+   * --------------------------------------------------
+   * Update invoice item
+   * --------------------------------------------------
+   */
 
   function updateItem(
     id: string,
-    field: keyof Omit<
-      InvoiceItem,
-      "id"
-    >,
+    field: keyof Omit<InvoiceItem, "id">,
     value: string
   ) {
-    setItems(
-      (currentItems) =>
-        currentItems.map(
-          (item) =>
-            item.id === id
-              ? {
-                  ...item,
-                  [field]: value,
-                }
-              : item
-        )
+    setItems((currentItems) =>
+      currentItems.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              [field]: value,
+            }
+          : item
+      )
     );
   }
 
-  async function checkInvoiceAccess(
-    businessIdToCheck: string
-  ): Promise<SubscriptionAccessResponse | null> {
-    const response = await fetch(
-      "/api/subscription/check",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type":
-            "application/json",
-        },
-        body: JSON.stringify({
-          feature: "invoice",
-          businessId:
-            businessIdToCheck,
-        }),
-      }
-    );
-
-    let data: SubscriptionAccessResponse =
-      {};
-
-    try {
-      data = await response.json();
-    } catch (jsonError) {
-      console.error(
-        "Subscription response parsing error:",
-        jsonError
-      );
-    }
-
-    if (
-      !response.ok &&
-      !data.error
-    ) {
-      data.error =
-        "Unable to verify your subscription access.";
-    }
-
-    return data;
-  }
+  /*
+   * --------------------------------------------------
+   * Submit invoice
+   * --------------------------------------------------
+   *
+   * IMPORTANT:
+   *
+   * Invoice creation is now handled by:
+   *
+   * POST /api/invoices
+   *
+   * The API route:
+   *
+   * 1. Authenticates the user
+   * 2. Verifies business ownership
+   * 3. Verifies customer ownership
+   * 4. Verifies job ownership
+   * 5. Checks subscription limits
+   * 6. Validates invoice items
+   * 7. Calculates subtotal/tax/total
+   * 8. Creates invoice
+   * 9. Creates invoice items
+   *
+   * The browser therefore does NOT insert
+   * directly into the invoices table.
+   */
 
   async function handleSubmit(
     event: FormEvent
@@ -462,6 +476,13 @@ export default function NewInvoicePage() {
 
     setError("");
     setLimitMessage("");
+
+    /*
+     * Basic UI checks only.
+     *
+     * Detailed validation is performed by
+     * the server API.
+     */
 
     if (!customerId) {
       setError(
@@ -491,64 +512,6 @@ export default function NewInvoicePage() {
       return;
     }
 
-    const hasInvalidItem =
-      items.some(
-        (item) => {
-          const quantity =
-            Number(
-              item.quantity
-            );
-
-          const unitPrice =
-            Number(
-              item.unit_price
-            );
-
-          return (
-            !item.description.trim() ||
-            !Number.isFinite(
-              quantity
-            ) ||
-            quantity <= 0 ||
-            !Number.isFinite(
-              unitPrice
-            ) ||
-            unitPrice < 0
-          );
-        }
-      );
-
-    if (hasInvalidItem) {
-      setError(
-        "Please complete every invoice item. Quantity must be greater than zero and price cannot be negative."
-      );
-      return;
-    }
-
-    if (
-      !Number.isFinite(
-        subtotal
-      ) ||
-      subtotal < 0
-    ) {
-      setError(
-        "Subtotal cannot be negative."
-      );
-      return;
-    }
-
-    if (
-      !Number.isFinite(
-        taxNumber
-      ) ||
-      taxNumber < 0
-    ) {
-      setError(
-        "Tax cannot be negative."
-      );
-      return;
-    }
-
     if (!businessId) {
       setError(
         "Unable to identify your business."
@@ -559,107 +522,200 @@ export default function NewInvoicePage() {
     setSaving(true);
 
     try {
-      const {
-        data: { user },
-      } =
-        await supabase.auth.getUser();
-
-      if (!user) {
-        router.replace("/login");
-        return;
-      }
-
       /*
-       * IMPORTANT:
-       *
-       * Check the subscription limit again
-       * immediately before creating the invoice.
-       *
-       * This prevents a user from opening the
-       * page while they have an available invoice
-       * and then exceeding the limit before saving.
+       * --------------------------------------------------
+       * 1. Get the current authenticated session
+       * --------------------------------------------------
        */
-      const access =
-        await checkInvoiceAccess(
-          businessId
+
+      const {
+        data: sessionData,
+        error: sessionError,
+      } =
+        await supabase.auth.getSession();
+
+      if (sessionError) {
+        console.error(
+          "Session error:",
+          sessionError
         );
 
-      if (
-        !access ||
-        !access.allowed
-      ) {
-        setLimitMessage(
-          access?.error ||
-            "You have reached the Free plan invoice limit."
+        setError(
+          "Unable to verify your session. Please sign in again."
         );
-
-        if (
-          access?.code ===
-          "UNAUTHENTICATED"
-        ) {
-          router.replace("/login");
-          return;
-        }
 
         setSaving(false);
         return;
       }
 
-      setRemainingInvoices(
-        access.remaining ?? null
+      const accessToken =
+        sessionData.session?.access_token;
+
+      if (!accessToken) {
+        router.replace("/login");
+        return;
+      }
+
+      /*
+       * --------------------------------------------------
+       * 2. Prepare invoice items
+       * --------------------------------------------------
+       *
+       * Convert the form strings to numbers here.
+       *
+       * The API performs the authoritative validation.
+       */
+
+      const apiItems = items.map(
+        (item) => ({
+          description:
+            item.description.trim(),
+
+          quantity:
+            Number(item.quantity),
+
+          unit_price:
+            Number(item.unit_price),
+        })
       );
 
       /*
-       * Create invoice.
+       * --------------------------------------------------
+       * 3. Prepare request
+       * --------------------------------------------------
        */
-      const {
-        data: invoice,
-        error: insertError,
-      } = await supabase
-        .from("invoices")
-        .insert({
-          business_id:
-            businessId,
-          customer_id:
-            customerId,
-          job_id:
-            jobId || null,
-          quote_id:
-            null,
-          invoice_number:
-            invoiceNumber.trim(),
-          title:
-            title.trim(),
-          description:
-            description.trim() ||
-            null,
-          status:
-            "draft",
-          subtotal,
-          tax:
-            taxNumber,
-          total,
-          due_date:
-            dueDate ||
-            null,
-          notes:
-            notes.trim() ||
-            null,
-        })
-        .select("id")
-        .single();
 
-      if (
-        insertError ||
-        !invoice
-      ) {
+      const requestBody = {
+        businessId,
+        customerId,
+        jobId: jobId || null,
+        invoiceNumber:
+          invoiceNumber.trim(),
+        title: title.trim(),
+        description:
+          description.trim() || null,
+        tax: Number(tax) || 0,
+        dueDate:
+          dueDate || null,
+        notes:
+          notes.trim() || null,
+        items: apiItems,
+      };
+
+      /*
+       * --------------------------------------------------
+       * 4. Send request to server
+       * --------------------------------------------------
+       */
+
+      const response = await fetch(
+        "/api/invoices",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+
+            Authorization:
+              `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(
+            requestBody
+          ),
+        }
+      );
+
+      let result: CreateInvoiceResponse =
+        {};
+
+      try {
+        result =
+          await response.json();
+      } catch (jsonError) {
         console.error(
-          "Invoice creation error:",
-          insertError
+          "Invoice API response parsing error:",
+          jsonError
+        );
+      }
+
+      /*
+       * --------------------------------------------------
+       * 5. Handle API errors
+       * --------------------------------------------------
+       */
+
+      if (!response.ok) {
+        console.error(
+          "Invoice API error:",
+          result
         );
 
+        /*
+         * Authentication error.
+         */
+
+        if (
+          response.status === 401 ||
+          result.code ===
+            "UNAUTHENTICATED"
+        ) {
+          router.replace("/login");
+          return;
+        }
+
+        /*
+         * Free-plan invoice limit.
+         */
+
+        if (
+          response.status === 403 &&
+          (
+            result.code ===
+              "FREE_LIMIT_REACHED" ||
+            result.code ===
+              "PLAN_LIMIT_REACHED"
+          )
+        ) {
+          setLimitMessage(
+            result.error ||
+              "You have reached the Free plan invoice limit."
+          );
+
+          if (
+            typeof result.remaining ===
+            "number"
+          ) {
+            setRemainingInvoices(
+              result.remaining
+            );
+          }
+
+          setSaving(false);
+          return;
+        }
+
+        /*
+         * Duplicate invoice number.
+         */
+
+        if (
+          response.status === 409
+        ) {
+          setError(
+            result.error ||
+              "That invoice number already exists. Please use a different invoice number."
+          );
+
+          setSaving(false);
+          return;
+        }
+
+        /*
+         * Normal validation/server error.
+         */
+
         setError(
-          insertError?.message ||
+          result.error ||
             "Unable to create invoice."
         );
 
@@ -668,74 +724,22 @@ export default function NewInvoicePage() {
       }
 
       /*
-       * Create invoice items.
+       * --------------------------------------------------
+       * 6. Confirm invoice was created
+       * --------------------------------------------------
        */
-      const invoiceItems =
-        items.map(
-          (item) => {
-            const quantity =
-              Number(
-                item.quantity
-              );
 
-            const unitPrice =
-              Number(
-                item.unit_price
-              );
-
-            return {
-              invoice_id:
-                invoice.id,
-              description:
-                item.description.trim(),
-              quantity,
-              unit_price:
-                unitPrice,
-              amount:
-                quantity *
-                unitPrice,
-            };
-          }
-        );
-
-      const {
-        error: itemsError,
-      } = await supabase
-        .from(
-          "invoice_items"
-        )
-        .insert(
-          invoiceItems
-        );
-
-      if (itemsError) {
+      if (
+        !result.success ||
+        !result.invoice?.id
+      ) {
         console.error(
-          "Invoice items creation error:",
-          itemsError
+          "Invalid invoice API success response:",
+          result
         );
-
-        /*
-         * Remove the invoice if
-         * its line items fail.
-         *
-         * The business_id condition makes
-         * the cleanup safer.
-         */
-        await supabase
-          .from("invoices")
-          .delete()
-          .eq(
-            "id",
-            invoice.id
-          )
-          .eq(
-            "business_id",
-            businessId
-          );
 
         setError(
-          itemsError.message ||
-            "Unable to save invoice items."
+          "The invoice was not created correctly."
         );
 
         setSaving(false);
@@ -743,11 +747,28 @@ export default function NewInvoicePage() {
       }
 
       /*
-       * Invoice and invoice items were
-       * created successfully.
+       * --------------------------------------------------
+       * 7. Update remaining invoice count
+       * --------------------------------------------------
        */
+
+      if (
+        typeof result.remaining ===
+        "number"
+      ) {
+        setRemainingInvoices(
+          result.remaining
+        );
+      }
+
+      /*
+       * --------------------------------------------------
+       * 8. Open the newly created invoice
+       * --------------------------------------------------
+       */
+
       router.push(
-        `/dashboard/invoices/${invoice.id}`
+        `/dashboard/invoices/${result.invoice.id}`
       );
     } catch (submitError) {
       console.error(
@@ -765,6 +786,12 @@ export default function NewInvoicePage() {
     }
   }
 
+  /*
+   * --------------------------------------------------
+   * Loading state
+   * --------------------------------------------------
+   */
+
   if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-950">
@@ -775,9 +802,16 @@ export default function NewInvoicePage() {
     );
   }
 
+  /*
+   * --------------------------------------------------
+   * Page
+   * --------------------------------------------------
+   */
+
   return (
     <main className="min-h-screen bg-slate-950 px-4 py-10 text-white sm:px-6 lg:px-8">
       <div className="mx-auto max-w-5xl">
+
         <Link
           href="/dashboard/invoices"
           className="text-sm text-blue-400 hover:text-blue-300"
@@ -791,8 +825,7 @@ export default function NewInvoicePage() {
           </h1>
 
           <p className="mt-2 text-slate-400">
-            Create a new invoice
-            for your customer.
+            Create a new invoice for your customer.
           </p>
         </div>
 
@@ -806,8 +839,8 @@ export default function NewInvoicePage() {
               {limitMessage}
             </p>
 
-            <Link
-              href="/dashboard/settings/billing"
+              <Link
+              href="/pricing"
               className="mt-4 inline-flex rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-amber-400"
             >
               Upgrade to Professional
@@ -815,8 +848,7 @@ export default function NewInvoicePage() {
           </div>
         )}
 
-        {remainingInvoices !==
-          null &&
+        {remainingInvoices !== null &&
           !limitMessage && (
             <div className="mt-6 rounded-xl border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-sm text-blue-200">
               You have{" "}
@@ -824,12 +856,10 @@ export default function NewInvoicePage() {
                 {remainingInvoices}
               </span>{" "}
               invoice
-              {remainingInvoices ===
-              1
+              {remainingInvoices === 1
                 ? ""
                 : "s"}{" "}
-              remaining on the
-              Free plan.
+              remaining on the Free plan.
             </div>
           )}
 
@@ -843,14 +873,17 @@ export default function NewInvoicePage() {
           onSubmit={handleSubmit}
           className="mt-8 space-y-6"
         >
+
           {/* Customer & Job */}
 
           <div className="rounded-2xl border border-white/10 bg-slate-900 p-6">
+
             <h2 className="text-lg font-semibold">
               Customer & Job
             </h2>
 
             <div className="mt-6 grid gap-6">
+
               <div>
                 <label
                   htmlFor="customer"
@@ -861,23 +894,16 @@ export default function NewInvoicePage() {
 
                 <select
                   id="customer"
-                  value={
-                    customerId
-                  }
-                  onChange={(
-                    event
-                  ) =>
+                  value={customerId}
+                  onChange={(event) =>
                     handleCustomerChange(
-                      event
-                        .target
-                        .value
+                      event.target.value
                     )
                   }
                   required
                   disabled={
-                    Boolean(
-                      limitMessage
-                    )
+                    Boolean(limitMessage) ||
+                    saving
                   }
                   className="w-full rounded-lg border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -886,24 +912,13 @@ export default function NewInvoicePage() {
                   </option>
 
                   {customers.map(
-                    (
-                      customer
-                    ) => (
+                    (customer) => (
                       <option
-                        key={
-                          customer.id
-                        }
-                        value={
-                          customer.id
-                        }
+                        key={customer.id}
+                        value={customer.id}
                       >
-                        {
-                          customer.first_name
-                        }{" "}
-                        {
-                          customer.last_name ??
-                          ""
-                        }
+                        {customer.first_name}{" "}
+                        {customer.last_name ?? ""}
                         {customer.company_name
                           ? ` — ${customer.company_name}`
                           : ""}
@@ -924,20 +939,15 @@ export default function NewInvoicePage() {
                 <select
                   id="job"
                   value={jobId}
-                  onChange={(
-                    event
-                  ) =>
+                  onChange={(event) =>
                     setJobId(
-                      event
-                        .target
-                        .value
+                      event.target.value
                     )
                   }
                   disabled={
                     !customerId ||
-                    Boolean(
-                      limitMessage
-                    )
+                    Boolean(limitMessage) ||
+                    saving
                   }
                   className="w-full rounded-lg border border-white/10 bg-slate-950 px-4 py-3 text-white outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -948,32 +958,35 @@ export default function NewInvoicePage() {
                   {filteredJobs.map(
                     (job) => (
                       <option
-                        key={
-                          job.id
-                        }
-                        value={
-                          job.id
-                        }
+                        key={job.id}
+                        value={job.id}
                       >
-                        {
-                          job.title
-                        }
+                        {job.title}
+                        {job.estimated_value !==
+                        null
+                          ? ` — £${Number(
+                              job.estimated_value
+                            ).toFixed(2)}`
+                          : ""}
                       </option>
                     )
                   )}
                 </select>
               </div>
+
             </div>
           </div>
 
           {/* Invoice Information */}
 
           <div className="rounded-2xl border border-white/10 bg-slate-900 p-6">
+
             <h2 className="text-lg font-semibold">
               Invoice information
             </h2>
 
             <div className="mt-6 grid gap-6">
+
               <div>
                 <label
                   htmlFor="invoiceNumber"
@@ -985,23 +998,16 @@ export default function NewInvoicePage() {
                 <input
                   id="invoiceNumber"
                   type="text"
-                  value={
-                    invoiceNumber
-                  }
-                  onChange={(
-                    event
-                  ) =>
+                  value={invoiceNumber}
+                  onChange={(event) =>
                     setInvoiceNumber(
-                      event
-                        .target
-                        .value
+                      event.target.value
                     )
                   }
                   required
                   disabled={
-                    Boolean(
-                      limitMessage
-                    )
+                    Boolean(limitMessage) ||
+                    saving
                   }
                   className="w-full rounded-lg border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 />
@@ -1020,20 +1026,15 @@ export default function NewInvoicePage() {
                   type="text"
                   placeholder="Property maintenance work"
                   value={title}
-                  onChange={(
-                    event
-                  ) =>
+                  onChange={(event) =>
                     setTitle(
-                      event
-                        .target
-                        .value
+                      event.target.value
                     )
                   }
                   required
                   disabled={
-                    Boolean(
-                      limitMessage
-                    )
+                    Boolean(limitMessage) ||
+                    saving
                   }
                   className="w-full rounded-lg border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 />
@@ -1051,77 +1052,64 @@ export default function NewInvoicePage() {
                   id="description"
                   rows={4}
                   placeholder="Describe the overall work or services..."
-                  value={
-                    description
-                  }
-                  onChange={(
-                    event
-                  ) =>
+                  value={description}
+                  onChange={(event) =>
                     setDescription(
-                      event
-                        .target
-                        .value
+                      event.target.value
                     )
                   }
                   disabled={
-                    Boolean(
-                      limitMessage
-                    )
+                    Boolean(limitMessage) ||
+                    saving
                   }
                   className="w-full resize-none rounded-lg border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 />
               </div>
+
             </div>
           </div>
 
           {/* Invoice Items */}
 
           <div className="rounded-2xl border border-white/10 bg-slate-900 p-6">
+
             <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+
               <div>
                 <h2 className="text-lg font-semibold">
                   Invoice items
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-400">
-                  Add the services
-                  or products
-                  included in
-                  this invoice.
+                  Add the services or products included in this invoice.
                 </p>
               </div>
 
               <button
                 type="button"
-                onClick={
-                  addItem
-                }
+                onClick={addItem}
                 disabled={
-                  Boolean(
-                    limitMessage
-                  )
+                  Boolean(limitMessage) ||
+                  saving
                 }
                 className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-2.5 text-sm font-semibold text-blue-300 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 + Add item
               </button>
+
             </div>
 
             <div className="mt-6 space-y-4">
+
               {items.map(
-                (
-                  item,
-                  index
-                ) => {
+                (item, index) => {
                   const quantity =
-                    Number(
-                      item.quantity
-                    ) || 0;
+                    Number(item.quantity) ||
+                    0;
 
                   const unitPrice =
-                    Number(
-                      item.unit_price
-                    ) || 0;
+                    Number(item.unit_price) ||
+                    0;
 
                   const amount =
                     quantity *
@@ -1129,16 +1117,14 @@ export default function NewInvoicePage() {
 
                   return (
                     <div
-                      key={
-                        item.id
-                      }
+                      key={item.id}
                       className="rounded-xl border border-white/10 bg-slate-950 p-4"
                     >
+
                       <div className="mb-4 flex items-center justify-between">
+
                         <p className="text-sm font-semibold text-slate-300">
-                          Item{" "}
-                          {index +
-                            1}
+                          Item {index + 1}
                         </p>
 
                         <button
@@ -1153,15 +1139,18 @@ export default function NewInvoicePage() {
                               1 ||
                             Boolean(
                               limitMessage
-                            )
+                            ) ||
+                            saving
                           }
                           className="text-sm font-medium text-red-400 transition hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-30"
                         >
                           Remove
                         </button>
+
                       </div>
 
                       <div className="grid gap-4 md:grid-cols-[1fr_120px_160px_140px]">
+
                         <div>
                           <label
                             htmlFor={`description-${item.id}`}
@@ -1174,24 +1163,19 @@ export default function NewInvoicePage() {
                             id={`description-${item.id}`}
                             type="text"
                             placeholder="Labour, materials, call-out..."
-                            value={
-                              item.description
-                            }
-                            onChange={(
-                              event
-                            ) =>
+                            value={item.description}
+                            onChange={(event) =>
                               updateItem(
                                 item.id,
                                 "description",
-                                event
-                                  .target
-                                  .value
+                                event.target.value
                               )
                             }
                             disabled={
                               Boolean(
                                 limitMessage
-                              )
+                              ) ||
+                              saving
                             }
                             className="w-full rounded-lg border border-white/10 bg-slate-900 px-4 py-3 outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                           />
@@ -1210,24 +1194,19 @@ export default function NewInvoicePage() {
                             type="number"
                             min="0.01"
                             step="0.01"
-                            value={
-                              item.quantity
-                            }
-                            onChange={(
-                              event
-                            ) =>
+                            value={item.quantity}
+                            onChange={(event) =>
                               updateItem(
                                 item.id,
                                 "quantity",
-                                event
-                                  .target
-                                  .value
+                                event.target.value
                               )
                             }
                             disabled={
                               Boolean(
                                 limitMessage
-                              )
+                              ) ||
+                              saving
                             }
                             className="w-full rounded-lg border border-white/10 bg-slate-900 px-4 py-3 outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                           />
@@ -1246,25 +1225,20 @@ export default function NewInvoicePage() {
                             type="number"
                             min="0"
                             step="0.01"
-                            value={
-                              item.unit_price
-                            }
-                            onChange={(
-                              event
-                            ) =>
+                            value={item.unit_price}
+                            onChange={(event) =>
                               updateItem(
                                 item.id,
                                 "unit_price",
-                                event
-                                  .target
-                                  .value
+                                event.target.value
                               )
                             }
                             placeholder="0.00"
                             disabled={
                               Boolean(
                                 limitMessage
-                              )
+                              ) ||
+                              saving
                             }
                             className="w-full rounded-lg border border-white/10 bg-slate-900 px-4 py-3 outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                           />
@@ -1276,36 +1250,34 @@ export default function NewInvoicePage() {
                           </label>
 
                           <div className="rounded-lg border border-white/10 bg-slate-900 px-4 py-3 font-semibold">
-                            £
-                            {amount.toFixed(
-                              2
-                            )}
+                            £{amount.toFixed(2)}
                           </div>
                         </div>
+
                       </div>
                     </div>
                   );
                 }
               )}
+
             </div>
 
             {/* Pricing Summary */}
 
             <div className="mt-8 ml-auto max-w-sm space-y-4 border-t border-white/10 pt-6">
+
               <div className="flex items-center justify-between">
                 <span className="text-sm text-slate-400">
                   Subtotal
                 </span>
 
                 <span className="font-medium">
-                  £
-                  {subtotal.toFixed(
-                    2
-                  )}
+                  £{subtotal.toFixed(2)}
                 </span>
               </div>
 
               <div className="flex items-center justify-between gap-4">
+
                 <label
                   htmlFor="tax"
                   className="text-sm text-slate-400"
@@ -1319,48 +1291,46 @@ export default function NewInvoicePage() {
                   min="0"
                   step="0.01"
                   value={tax}
-                  onChange={(
-                    event
-                  ) =>
+                  onChange={(event) =>
                     setTax(
-                      event
-                        .target
-                        .value
+                      event.target.value
                     )
                   }
                   placeholder="0.00"
                   disabled={
-                    Boolean(
-                      limitMessage
-                    )
+                    Boolean(limitMessage) ||
+                    saving
                   }
                   className="w-32 rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-right outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 />
+
               </div>
 
               <div className="flex items-center justify-between border-t border-white/10 pt-4">
+
                 <span className="text-lg font-semibold">
                   Total
                 </span>
 
                 <span className="text-3xl font-bold">
-                  £
-                  {total.toFixed(
-                    2
-                  )}
+                  £{total.toFixed(2)}
                 </span>
+
               </div>
+
             </div>
           </div>
 
           {/* Additional Information */}
 
           <div className="rounded-2xl border border-white/10 bg-slate-900 p-6">
+
             <h2 className="text-lg font-semibold">
               Additional information
             </h2>
 
             <div className="mt-6 grid gap-6">
+
               <div>
                 <label
                   htmlFor="dueDate"
@@ -1373,19 +1343,14 @@ export default function NewInvoicePage() {
                   id="dueDate"
                   type="date"
                   value={dueDate}
-                  onChange={(
-                    event
-                  ) =>
+                  onChange={(event) =>
                     setDueDate(
-                      event
-                        .target
-                        .value
+                      event.target.value
                     )
                   }
                   disabled={
-                    Boolean(
-                      limitMessage
-                    )
+                    Boolean(limitMessage) ||
+                    saving
                   }
                   className="w-full rounded-lg border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 />
@@ -1404,29 +1369,26 @@ export default function NewInvoicePage() {
                   rows={5}
                   placeholder="Payment instructions or additional notes..."
                   value={notes}
-                  onChange={(
-                    event
-                  ) =>
+                  onChange={(event) =>
                     setNotes(
-                      event
-                        .target
-                        .value
+                      event.target.value
                     )
                   }
                   disabled={
-                    Boolean(
-                      limitMessage
-                    )
+                    Boolean(limitMessage) ||
+                    saving
                   }
                   className="w-full resize-none rounded-lg border border-white/10 bg-slate-950 px-4 py-3 outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 />
               </div>
+
             </div>
           </div>
 
           {/* Actions */}
 
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+
             <Link
               href="/dashboard/invoices"
               className="rounded-lg border border-white/10 px-6 py-3 text-center font-semibold text-slate-300 transition hover:bg-white/5"
@@ -1438,9 +1400,7 @@ export default function NewInvoicePage() {
               type="submit"
               disabled={
                 saving ||
-                Boolean(
-                  limitMessage
-                )
+                Boolean(limitMessage)
               }
               className="rounded-lg bg-blue-600 px-6 py-3 font-semibold transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -1448,7 +1408,9 @@ export default function NewInvoicePage() {
                 ? "Creating invoice..."
                 : "Create invoice"}
             </button>
+
           </div>
+
         </form>
       </div>
     </main>

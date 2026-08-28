@@ -2,9 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
-
+import { supabase } from "@/lib/supabase";
 
 type Customer = {
   id: string;
@@ -23,6 +22,7 @@ type Job = {
 export default function NewQuotePage() {
   const router = useRouter();
 
+  const [businessId, setBusinessId] = useState("");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
 
@@ -43,32 +43,39 @@ export default function NewQuotePage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    let mounted = true;
+
     async function loadData() {
       setLoading(true);
       setError("");
 
       const {
         data: { user },
+        error: userError,
       } = await supabase.auth.getUser();
 
-      if (!user) {
-        router.replace("/login");
+      if (userError || !user) {
+        if (mounted) {
+          router.replace("/login");
+        }
         return;
       }
 
-      const {
-        data: business,
-        error: businessError,
-      } = await supabase
-        .from("businesses")
-        .select("id")
-        .eq("owner_id", user.id)
-        .maybeSingle();
+      const { data: business, error: businessError } =
+        await supabase
+          .from("businesses")
+          .select("id")
+          .eq("owner_id", user.id)
+          .maybeSingle();
 
       if (businessError) {
         console.error(businessError);
-        setError("Unable to load your business.");
-        setLoading(false);
+
+        if (mounted) {
+          setError("Unable to load your business.");
+          setLoading(false);
+        }
+
         return;
       }
 
@@ -77,58 +84,68 @@ export default function NewQuotePage() {
         return;
       }
 
-      const {
-        data: customerData,
-        error: customerError,
-      } = await supabase
-        .from("customers")
-        .select(
-          "id, first_name, last_name, company_name"
-        )
-        .eq("business_id", business.id)
-        .order("first_name", {
-          ascending: true,
-        });
+      const { data: customerData, error: customerError } =
+        await supabase
+          .from("customers")
+          .select(
+            "id, first_name, last_name, company_name"
+          )
+          .eq("business_id", business.id)
+          .eq("status", "active")
+          .order("first_name", {
+            ascending: true,
+          });
 
       if (customerError) {
         console.error(customerError);
-        setError("Unable to load customers.");
-        setLoading(false);
+
+        if (mounted) {
+          setError("Unable to load customers.");
+          setLoading(false);
+        }
+
         return;
       }
 
-      const {
-        data: jobData,
-        error: jobError,
-      } = await supabase
-        .from("jobs")
-        .select(
-          "id, title, customer_id, estimated_value"
-        )
-        .eq("business_id", business.id)
-        .order("created_at", {
-          ascending: false,
-        });
+      const { data: jobData, error: jobError } =
+        await supabase
+          .from("jobs")
+          .select(
+            "id, title, customer_id, estimated_value"
+          )
+          .eq("business_id", business.id)
+          .order("created_at", {
+            ascending: false,
+          });
 
       if (jobError) {
         console.error(jobError);
-        setError("Unable to load jobs.");
-        setLoading(false);
+
+        if (mounted) {
+          setError("Unable to load jobs.");
+          setLoading(false);
+        }
+
         return;
       }
-
-      setCustomers(customerData ?? []);
-      setJobs(jobData ?? []);
 
       const nextQuoteNumber =
         `Q-${Date.now().toString().slice(-6)}`;
 
-      setQuoteNumber(nextQuoteNumber);
-
-      setLoading(false);
+      if (mounted) {
+        setBusinessId(business.id);
+        setCustomers(customerData ?? []);
+        setJobs(jobData ?? []);
+        setQuoteNumber(nextQuoteNumber);
+        setLoading(false);
+      }
     }
 
     loadData();
+
+    return () => {
+      mounted = false;
+    };
   }, [router]);
 
   const filteredJobs = customerId
@@ -138,17 +155,19 @@ export default function NewQuotePage() {
     : [];
 
   const subtotalNumber =
-    Number(subtotal) || 0;
+    subtotal.trim() !== ""
+      ? Number(subtotal)
+      : 0;
 
   const taxNumber =
-    Number(tax) || 0;
+    tax.trim() !== ""
+      ? Number(tax)
+      : 0;
 
   const total =
     subtotalNumber + taxNumber;
 
-  function handleCustomerChange(
-    value: string
-  ) {
+  function handleCustomerChange(value: string) {
     setCustomerId(value);
     setJobId("");
   }
@@ -160,6 +179,11 @@ export default function NewQuotePage() {
 
     setError("");
 
+    if (!businessId) {
+      setError("Business information is missing.");
+      return;
+    }
+
     if (!customerId) {
       setError("Please select a customer.");
       return;
@@ -170,13 +194,24 @@ export default function NewQuotePage() {
       return;
     }
 
-    if (subtotalNumber < 0) {
-      setError("Subtotal cannot be negative.");
+    if (
+      !Number.isFinite(subtotalNumber) ||
+      subtotalNumber < 0
+    ) {
+      setError("Subtotal must be a valid positive number.");
       return;
     }
 
-    if (taxNumber < 0) {
-      setError("Tax cannot be negative.");
+    if (
+      !Number.isFinite(taxNumber) ||
+      taxNumber < 0
+    ) {
+      setError("Tax must be a valid positive number.");
+      return;
+    }
+
+    if (!quoteNumber.trim()) {
+      setError("Quote number is required.");
       return;
     }
 
@@ -184,103 +219,90 @@ export default function NewQuotePage() {
 
     try {
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
 
-      if (!user) {
-        router.replace("/login");
-        return;
-      }
-
-      const {
-        data: business,
-        error: businessError,
-      } = await supabase
-        .from("businesses")
-        .select("id")
-        .eq("owner_id", user.id)
-        .maybeSingle();
-
-      if (businessError || !business) {
+      if (!session?.access_token) {
         setError(
-          "Unable to find your business."
+          "Your session has expired. Please sign in again."
         );
         setSaving(false);
+        router.replace("/login");
         return;
       }
 
       /*
        * Check subscription access BEFORE creating the quote.
        */
-     
-const {
-  data: { session },
-} = await supabase.auth.getSession();
+      const subscriptionResponse = await fetch(
+        "/api/subscription/check",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            feature: "quote",
+            businessId,
+          }),
+        }
+      );
 
-if (!session?.access_token) {
-  setError(
-    "Your session has expired. Please log in again."
-  );
-  setSaving(false);
-  return;
-}
+      let access: {
+        allowed?: boolean;
+        error?: string;
+        code?: string;
+      };
 
-const subscriptionResponse = await fetch(
-  "/api/subscription/check",
-  {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    body: JSON.stringify({
-      resource: "quote",
-    }),
-  }
-);
+      try {
+        access = await subscriptionResponse.json();
+      } catch {
+        access = {
+          allowed: false,
+          error: "Unable to verify subscription access.",
+        };
+      }
 
-const subscriptionResult =
-  await subscriptionResponse.json();
+      if (
+        !subscriptionResponse.ok ||
+        !access.allowed
+      ) {
+        setError(
+          access.error ||
+            "Free plan limit reached. Please upgrade to Professional."
+        );
+        setSaving(false);
+        return;
+      }
 
-if (
-  !subscriptionResponse.ok ||
-  !subscriptionResult.allowed
-) {
-  setError(
-    subscriptionResult.error ||
-      "Free plan limit reached. Please upgrade to Professional."
-  );
-  setSaving(false);
-  return;
-}
-      const {
-        data,
-        error: insertError,
-      } = await supabase
-        .from("quotes")
-        .insert({
-          business_id: business.id,
-          customer_id: customerId,
-          job_id: jobId || null,
-          quote_number: quoteNumber.trim(),
-          title: title.trim(),
-          description:
-            description.trim() || null,
-          status: "draft",
-          subtotal: subtotalNumber,
-          tax: taxNumber,
-          total,
-          valid_until:
-            validUntil || null,
-          notes:
-            notes.trim() || null,
-        })
-        .select()
-        .single();
+      const { data, error: insertError } =
+        await supabase
+          .from("quotes")
+          .insert({
+            business_id: businessId,
+            customer_id: customerId,
+            job_id: jobId || null,
+            quote_number: quoteNumber.trim(),
+            title: title.trim(),
+            description:
+              description.trim() || null,
+            status: "draft",
+            subtotal: subtotalNumber,
+            tax: taxNumber,
+            total,
+            valid_until: validUntil || null,
+            notes: notes.trim() || null,
+          })
+          .select("id")
+          .single();
 
       if (insertError) {
         console.error(insertError);
-        setError(insertError.message);
+
+        setError(
+          "Unable to create the quote. Please try again."
+        );
         setSaving(false);
         return;
       }
@@ -288,6 +310,7 @@ if (
       router.push(
         `/dashboard/quotes/${data.id}`
       );
+      router.refresh();
     } catch (error) {
       console.error(error);
 
@@ -424,6 +447,13 @@ if (
                     </option>
                   ))}
                 </select>
+
+                {customerId &&
+                  filteredJobs.length === 0 && (
+                    <p className="mt-2 text-sm text-slate-500">
+                      No jobs found for this customer.
+                    </p>
+                  )}
               </div>
             </div>
           </div>
@@ -555,7 +585,9 @@ if (
                 </span>
 
                 <span className="text-3xl font-bold">
-                  £{total.toFixed(2)}
+                  £{Number.isFinite(total)
+                    ? total.toFixed(2)
+                    : "0.00"}
                 </span>
               </div>
             </div>

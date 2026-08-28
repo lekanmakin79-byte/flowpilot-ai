@@ -4,6 +4,12 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
+/*
+|--------------------------------------------------------------------------
+| ENVIRONMENT VARIABLES
+|--------------------------------------------------------------------------
+*/
+
 const stripeSecretKey =
   process.env.STRIPE_SECRET_KEY;
 
@@ -13,9 +19,21 @@ const supabaseUrl =
 const supabaseServiceRoleKey =
   process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+/*
+|--------------------------------------------------------------------------
+| STRIPE CLIENT
+|--------------------------------------------------------------------------
+*/
+
 const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey)
   : null;
+
+/*
+|--------------------------------------------------------------------------
+| SUPABASE ADMIN
+|--------------------------------------------------------------------------
+*/
 
 function getSupabaseAdmin() {
   if (
@@ -39,21 +57,33 @@ function getSupabaseAdmin() {
   );
 }
 
+/*
+|--------------------------------------------------------------------------
+| AUTHENTICATED USER
+|--------------------------------------------------------------------------
+*/
+
 async function getAuthenticatedUser(
   request: Request
 ) {
   const authorization =
-    request.headers.get("authorization");
+    request.headers.get(
+      "authorization"
+    );
 
   if (
     !authorization ||
-    !authorization.startsWith("Bearer ")
+    !authorization.startsWith(
+      "Bearer "
+    )
   ) {
     return null;
   }
 
   const token =
-    authorization.substring(7).trim();
+    authorization
+      .substring(7)
+      .trim();
 
   if (!token) {
     return null;
@@ -77,19 +107,39 @@ async function getAuthenticatedUser(
   return user;
 }
 
+/*
+|--------------------------------------------------------------------------
+| POST
+|--------------------------------------------------------------------------
+*/
+
 export async function POST(
   request: Request
 ) {
   try {
+    /*
+     * ---------------------------------------------------------------
+     * STRIPE CONFIGURATION
+     * ---------------------------------------------------------------
+     */
+
     if (!stripe) {
       return NextResponse.json(
         {
           error:
             "Stripe is not configured.",
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
+
+    /*
+     * ---------------------------------------------------------------
+     * AUTHENTICATION
+     * ---------------------------------------------------------------
+     */
 
     const user =
       await getAuthenticatedUser(
@@ -102,15 +152,38 @@ export async function POST(
           error:
             "Authentication required. Please log in again.",
         },
-        { status: 401 }
+        {
+          status: 401,
+        }
       );
     }
+
+    /*
+     * ---------------------------------------------------------------
+     * READ REQUEST
+     * ---------------------------------------------------------------
+     */
 
     const body =
       await request.json();
 
     const plan =
       body?.plan;
+
+    /*
+     * ---------------------------------------------------------------
+     * CURRENT PRODUCT
+     * ---------------------------------------------------------------
+     *
+     * At the moment FlowPilot AI sells the Professional plan.
+     *
+     * Professional = £19/month
+     *
+     * Business can be added later without changing the
+     * subscription-access system.
+     *
+     * ---------------------------------------------------------------
+     */
 
     if (
       plan !== "professional"
@@ -120,25 +193,16 @@ export async function POST(
           error:
             "Invalid subscription plan.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    const origin =
-      request.headers.get(
-        "origin"
-      ) ||
-      process.env.NEXT_PUBLIC_APP_URL ||
-      "http://localhost:3000";
-
     /*
-     * IMPORTANT:
-     *
-     * We will create the £19/month
-     * Stripe Price separately in Stripe.
-     *
-     * The Price ID will be stored
-     * in STRIPE_PROFESSIONAL_PRICE_ID.
+     * ---------------------------------------------------------------
+     * STRIPE PRICE
+     * ---------------------------------------------------------------
      */
 
     const priceId =
@@ -151,9 +215,113 @@ export async function POST(
           error:
             "Professional subscription price is not configured.",
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
+
+    /*
+     * ---------------------------------------------------------------
+     * ORIGIN
+     * ---------------------------------------------------------------
+     */
+
+    const origin =
+      request.headers.get(
+        "origin"
+      ) ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "http://localhost:3000";
+
+    /*
+     * ---------------------------------------------------------------
+     * CHECK EXISTING SUBSCRIPTION
+     * ---------------------------------------------------------------
+     *
+     * Prevent the same user from repeatedly creating subscriptions.
+     *
+     * ---------------------------------------------------------------
+     */
+
+    const supabase =
+      getSupabaseAdmin();
+
+    const {
+      data: existingSubscription,
+      error:
+        existingSubscriptionError,
+    } =
+      await supabase
+        .from("subscriptions")
+        .select(
+          `
+            stripe_customer_id,
+            stripe_subscription_id,
+            plan,
+            status
+          `
+        )
+        .eq(
+          "user_id",
+          user.id
+        )
+        .maybeSingle();
+
+    if (
+      existingSubscriptionError
+    ) {
+      console.error(
+        "Existing subscription lookup error:",
+        existingSubscriptionError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Unable to verify your current subscription.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    /*
+     * ---------------------------------------------------------------
+     * PREVENT DUPLICATE ACTIVE SUBSCRIPTIONS
+     * ---------------------------------------------------------------
+     */
+
+    if (
+      existingSubscription &&
+      (
+        existingSubscription.status ===
+          "active" ||
+        existingSubscription.status ===
+          "trialing" ||
+        existingSubscription.status ===
+          "past_due"
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "You already have an active Professional subscription.",
+          code:
+            "SUBSCRIPTION_ALREADY_ACTIVE",
+        },
+        {
+          status: 409,
+        }
+      );
+    }
+
+    /*
+     * ---------------------------------------------------------------
+     * CREATE STRIPE CHECKOUT
+     * ---------------------------------------------------------------
+     */
 
     const session =
       await stripe.checkout.sessions.create(
@@ -161,7 +329,8 @@ export async function POST(
           mode: "subscription",
 
           customer_email:
-            user.email || undefined,
+            user.email ||
+            undefined,
 
           line_items: [
             {
@@ -177,18 +346,30 @@ export async function POST(
             `${origin}/pricing?subscription=cancelled`,
 
           metadata: {
-            user_id: user.id,
-            plan: "professional",
+            user_id:
+              user.id,
+
+            plan:
+              "professional",
           },
 
           subscription_data: {
             metadata: {
-              user_id: user.id,
-              plan: "professional",
+              user_id:
+                user.id,
+
+              plan:
+                "professional",
             },
           },
         }
       );
+
+    /*
+     * ---------------------------------------------------------------
+     * CHECK SESSION URL
+     * ---------------------------------------------------------------
+     */
 
     if (!session.url) {
       return NextResponse.json(
@@ -196,14 +377,25 @@ export async function POST(
           error:
             "Unable to create Stripe Checkout session.",
         },
-        { status: 500 }
+        {
+          status: 500,
+        }
       );
     }
 
-    return NextResponse.json({
-      success: true,
-      url: session.url,
-    });
+    /*
+     * ---------------------------------------------------------------
+     * SUCCESS
+     * ---------------------------------------------------------------
+     */
+
+    return NextResponse.json(
+      {
+        success: true,
+        url:
+          session.url,
+      }
+    );
   } catch (error: any) {
     console.error(
       "Stripe checkout error:",
@@ -216,7 +408,9 @@ export async function POST(
           error?.message ||
           "Unable to start Stripe Checkout.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }

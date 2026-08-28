@@ -1,41 +1,35 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { canCreateInvoice } from "@/lib/subscription-access";
+import {
+  checkInvoiceAccess,
+} from "@/lib/subscription-access";
 
-type InvoiceItemInput = {
-  description: string;
-  quantity: number;
-  unit_price: number;
-};
+export const dynamic = "force-dynamic";
 
-type CreateInvoiceRequest = {
-  businessId: string;
-  customerId: string;
-  jobId?: string | null;
-  invoiceNumber: string;
-  title: string;
-  description?: string | null;
-  tax?: number;
-  dueDate?: string | null;
-  notes?: string | null;
-  items: InvoiceItemInput[];
-};
+/*
+|--------------------------------------------------------------------------
+| SUPABASE ADMIN CLIENT
+|--------------------------------------------------------------------------
+*/
 
 function getSupabaseAdmin() {
-  const url =
+  const supabaseUrl =
     process.env.NEXT_PUBLIC_SUPABASE_URL;
 
   const serviceRoleKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!url || !serviceRoleKey) {
+  if (
+    !supabaseUrl ||
+    !serviceRoleKey
+  ) {
     throw new Error(
       "Supabase server configuration is missing."
     );
   }
 
   return createClient(
-    url,
+    supabaseUrl,
     serviceRoleKey,
     {
       auth: {
@@ -46,127 +40,252 @@ function getSupabaseAdmin() {
   );
 }
 
-function getSupabaseAuthClient() {
-  const url =
-    process.env.NEXT_PUBLIC_SUPABASE_URL;
+/*
+|--------------------------------------------------------------------------
+| AUTHENTICATE REQUEST
+|--------------------------------------------------------------------------
+*/
 
-  const anonKey =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !anonKey) {
-    throw new Error(
-      "Supabase client configuration is missing."
+async function getAuthenticatedUser(
+  request: Request
+) {
+  const authorization =
+    request.headers.get(
+      "authorization"
     );
+
+  if (
+    !authorization ||
+    !/^Bearer\s+/i.test(
+      authorization
+    )
+  ) {
+    return null;
   }
 
-  return createClient(
-    url,
-    anonKey,
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    }
+  const accessToken =
+    authorization
+      .replace(
+        /^Bearer\s+/i,
+        ""
+      )
+      .trim();
+
+  if (!accessToken) {
+    return null;
+  }
+
+  const supabase =
+    getSupabaseAdmin();
+
+  const {
+    data: { user },
+    error,
+  } =
+    await supabase.auth.getUser(
+      accessToken
+    );
+
+  if (
+    error ||
+    !user
+  ) {
+    console.error(
+      "Invoice authentication error:",
+      error
+    );
+
+    return null;
+  }
+
+  return user;
+}
+
+/*
+|--------------------------------------------------------------------------
+| VALIDATE STRING
+|--------------------------------------------------------------------------
+*/
+
+function requiredString(
+  value: unknown
+) {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0
   );
 }
 
+/*
+|--------------------------------------------------------------------------
+| GET REQUEST BODY
+|--------------------------------------------------------------------------
+*/
+
+interface InvoiceItemInput {
+  description: unknown;
+  quantity: unknown;
+  unit_price: unknown;
+}
+
+interface CreateInvoiceBody {
+  businessId?: unknown;
+  customerId?: unknown;
+  quoteId?: unknown;
+  jobId?: unknown;
+  invoiceNumber?: unknown;
+  title?: unknown;
+  description?: unknown;
+  status?: unknown;
+  subtotal?: unknown;
+  tax?: unknown;
+  total?: unknown;
+  dueDate?: unknown;
+  notes?: unknown;
+  items?: unknown;
+}
+
+/*
+|--------------------------------------------------------------------------
+| POST /api/invoices
+|--------------------------------------------------------------------------
+*/
+
 export async function POST(
-  request: NextRequest
+  request: Request
 ) {
   try {
     /*
-     * --------------------------------------------------
-     * 1. Authenticate the request
-     * --------------------------------------------------
+     * --------------------------------------------------------------
+     * AUTHENTICATION
+     * --------------------------------------------------------------
      */
 
-    const authorization =
-      request.headers.get(
-        "authorization"
+    const user =
+      await getAuthenticatedUser(
+        request
       );
 
-    if (
-      !authorization ||
-      !authorization.startsWith(
-        "Bearer "
+    if (!user) {
+      return NextResponse.json(
+        {
+          success: false,
+          allowed: false,
+          code: "UNAUTHENTICATED",
+          error:
+            "Your session has expired. Please sign in again.",
+        },
+        {
+          status: 401,
+        }
+      );
+    }
+
+    /*
+     * --------------------------------------------------------------
+     * READ BODY
+     * --------------------------------------------------------------
+     */
+
+    let body: CreateInvoiceBody;
+
+    try {
+      body =
+        await request.json();
+    } catch {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "INVALID_REQUEST",
+          error:
+            "Invalid request body.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /*
+     * --------------------------------------------------------------
+     * REQUIRED FIELDS
+     * --------------------------------------------------------------
+     */
+
+    const businessId =
+      typeof body.businessId ===
+      "string"
+        ? body.businessId.trim()
+        : "";
+
+    const customerId =
+      typeof body.customerId ===
+      "string"
+        ? body.customerId.trim()
+        : "";
+
+    const invoiceNumber =
+      typeof body.invoiceNumber ===
+      "string"
+        ? body.invoiceNumber.trim()
+        : "";
+
+    const title =
+      typeof body.title ===
+      "string"
+        ? body.title.trim()
+        : "";
+
+    const description =
+      typeof body.description ===
+      "string"
+        ? body.description.trim()
+        : "";
+
+    const quoteId =
+      requiredString(
+        body.quoteId
       )
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "You must be signed in.",
-        },
-        {
-          status: 401,
-        }
-      );
-    }
+        ? String(
+            body.quoteId
+          ).trim()
+        : null;
 
-    const accessToken =
-      authorization.substring(
-        "Bearer ".length
-      );
+    const jobId =
+      requiredString(
+        body.jobId
+      )
+        ? String(
+            body.jobId
+          ).trim()
+        : null;
 
-    const authClient =
-      getSupabaseAuthClient();
+    const dueDate =
+      requiredString(
+        body.dueDate
+      )
+        ? String(
+            body.dueDate
+          ).trim()
+        : null;
 
-    const {
-      data: {
-        user,
-      },
-      error: userError,
-    } =
-      await authClient.auth.getUser(
-        accessToken
-      );
-
-    if (
-      userError ||
-      !user
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Your session is invalid or has expired. Please sign in again.",
-        },
-        {
-          status: 401,
-        }
-      );
-    }
+    const notes =
+      typeof body.notes ===
+      "string"
+        ? body.notes.trim()
+        : "";
 
     /*
-     * --------------------------------------------------
-     * 2. Read request data
-     * --------------------------------------------------
-     */
-
-    const body =
-      (await request.json()) as CreateInvoiceRequest;
-
-    const {
-      businessId,
-      customerId,
-      jobId,
-      invoiceNumber,
-      title,
-      description,
-      tax,
-      dueDate,
-      notes,
-      items,
-    } = body;
-
-    /*
-     * --------------------------------------------------
-     * 3. Basic validation
-     * --------------------------------------------------
+     * --------------------------------------------------------------
+     * VALIDATE REQUIRED VALUES
+     * --------------------------------------------------------------
      */
 
     if (!businessId) {
       return NextResponse.json(
         {
+          success: false,
+          code: "INVALID_BUSINESS",
           error:
             "Business information is required.",
         },
@@ -179,8 +298,10 @@ export async function POST(
     if (!customerId) {
       return NextResponse.json(
         {
+          success: false,
+          code: "INVALID_CUSTOMER",
           error:
-            "Please select a customer.",
+            "A customer is required.",
         },
         {
           status: 400,
@@ -188,14 +309,13 @@ export async function POST(
       );
     }
 
-    if (
-      !invoiceNumber ||
-      !invoiceNumber.trim()
-    ) {
+    if (!invoiceNumber) {
       return NextResponse.json(
         {
+          success: false,
+          code: "INVALID_INVOICE_NUMBER",
           error:
-            "Please enter an invoice number.",
+            "Invoice number is required.",
         },
         {
           status: 400,
@@ -203,29 +323,13 @@ export async function POST(
       );
     }
 
-    if (
-      !title ||
-      !title.trim()
-    ) {
+    if (!title) {
       return NextResponse.json(
         {
+          success: false,
+          code: "INVALID_TITLE",
           error:
-            "Please enter an invoice title.",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    if (
-      !Array.isArray(items) ||
-      items.length === 0
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Please add at least one invoice item.",
+            "Invoice title is required.",
         },
         {
           status: 400,
@@ -234,19 +338,260 @@ export async function POST(
     }
 
     /*
-     * --------------------------------------------------
-     * 4. Get admin client
-     * --------------------------------------------------
+     * --------------------------------------------------------------
+     * VALIDATE INVOICE NUMBER LENGTH
+     * --------------------------------------------------------------
+     */
+
+    if (
+      invoiceNumber.length > 100
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "INVALID_INVOICE_NUMBER",
+          error:
+            "Invoice number is too long.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /*
+     * --------------------------------------------------------------
+     * ITEMS
+     * --------------------------------------------------------------
+     */
+
+    if (
+      !Array.isArray(
+        body.items
+      ) ||
+      body.items.length === 0
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "INVALID_ITEMS",
+          error:
+            "At least one invoice item is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (
+      body.items.length > 100
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "INVALID_ITEMS",
+          error:
+            "An invoice cannot contain more than 100 items.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /*
+     * --------------------------------------------------------------
+     * NORMALISE ITEMS
+     * --------------------------------------------------------------
+     */
+
+    const invoiceItems =
+      body.items.map(
+        (
+          item: InvoiceItemInput,
+          index: number
+        ) => {
+          const itemDescription =
+            typeof item?.description ===
+            "string"
+              ? item.description.trim()
+              : "";
+
+          const quantity =
+            Number(
+              item?.quantity
+            );
+
+          const unitPrice =
+            Number(
+              item?.unit_price
+            );
+
+          if (
+            !itemDescription
+          ) {
+            throw new Error(
+              `Invoice item ${index + 1} requires a description.`
+            );
+          }
+
+          if (
+            !Number.isFinite(
+              quantity
+            ) ||
+            quantity <= 0
+          ) {
+            throw new Error(
+              `Invoice item ${index + 1} has an invalid quantity.`
+            );
+          }
+
+          if (
+            !Number.isFinite(
+              unitPrice
+            ) ||
+            unitPrice < 0
+          ) {
+            throw new Error(
+              `Invoice item ${index + 1} has an invalid unit price.`
+            );
+          }
+
+          /*
+           * Prevent extreme values from entering the database.
+           */
+
+          if (
+            quantity > 1000000
+          ) {
+            throw new Error(
+              `Invoice item ${index + 1} quantity is too large.`
+            );
+          }
+
+          if (
+            unitPrice > 100000000
+          ) {
+            throw new Error(
+              `Invoice item ${index + 1} price is too large.`
+            );
+          }
+
+          const amount =
+            quantity *
+            unitPrice;
+
+          if (
+            !Number.isFinite(
+              amount
+            ) ||
+            amount < 0
+          ) {
+            throw new Error(
+              `Invoice item ${index + 1} has an invalid amount.`
+            );
+          }
+
+          return {
+            description:
+              itemDescription,
+            quantity,
+            unit_price:
+              unitPrice,
+            amount,
+          };
+        }
+      );
+
+    /*
+     * --------------------------------------------------------------
+     * CALCULATE TOTALS ON THE SERVER
+     * --------------------------------------------------------------
+     *
+     * NEVER trust subtotal/tax/total values supplied by the browser.
+     * --------------------------------------------------------------
+     */
+
+    const calculatedSubtotal =
+      invoiceItems.reduce(
+        (
+          sum,
+          item
+        ) =>
+          sum +
+          item.amount,
+        0
+      );
+
+    const tax =
+      Number(
+        body.tax
+      );
+
+    if (
+      !Number.isFinite(
+        tax
+      ) ||
+      tax < 0
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "INVALID_TAX",
+          error:
+            "Tax cannot be negative.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (
+      tax > 100000000
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "INVALID_TAX",
+          error:
+            "Tax value is too large.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    const subtotal =
+      Number(
+        calculatedSubtotal.toFixed(
+          2
+        )
+      );
+
+    const total =
+      Number(
+        (
+          subtotal +
+          tax
+        ).toFixed(2)
+      );
+
+    /*
+     * --------------------------------------------------------------
+     * SUPABASE
+     * --------------------------------------------------------------
      */
 
     const supabase =
       getSupabaseAdmin();
 
     /*
-     * --------------------------------------------------
-     * 5. Verify that the logged-in user owns
-     *    the requested business
-     * --------------------------------------------------
+     * --------------------------------------------------------------
+     * VERIFY BUSINESS OWNERSHIP
+     * --------------------------------------------------------------
      */
 
     const {
@@ -267,18 +612,33 @@ export async function POST(
         .maybeSingle();
 
     if (
-      businessError ||
-      !business
+      businessError
     ) {
       console.error(
-        "Business ownership error:",
+        "Invoice business lookup error:",
         businessError
       );
 
       return NextResponse.json(
         {
+          success: false,
+          code: "BUSINESS_LOOKUP_ERROR",
           error:
             "Unable to verify your business.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    if (!business) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "BUSINESS_ACCESS_DENIED",
+          error:
+            "You do not have access to this business.",
         },
         {
           status: 403,
@@ -287,9 +647,9 @@ export async function POST(
     }
 
     /*
-     * --------------------------------------------------
-     * 6. Verify customer belongs to the business
-     * --------------------------------------------------
+     * --------------------------------------------------------------
+     * VERIFY CUSTOMER BELONGS TO BUSINESS
+     * --------------------------------------------------------------
      */
 
     const {
@@ -310,24 +670,44 @@ export async function POST(
         .maybeSingle();
 
     if (
-      customerError ||
-      !customer
+      customerError
     ) {
+      console.error(
+        "Invoice customer lookup error:",
+        customerError
+      );
+
       return NextResponse.json(
         {
+          success: false,
+          code: "CUSTOMER_LOOKUP_ERROR",
+          error:
+            "Unable to verify the selected customer.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    if (!customer) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "CUSTOMER_ACCESS_DENIED",
           error:
             "The selected customer does not belong to your business.",
         },
         {
-          status: 400,
+          status: 403,
         }
       );
     }
 
     /*
-     * --------------------------------------------------
-     * 7. Verify job if supplied
-     * --------------------------------------------------
+     * --------------------------------------------------------------
+     * VERIFY JOB
+     * --------------------------------------------------------------
      */
 
     if (jobId) {
@@ -337,7 +717,9 @@ export async function POST(
       } =
         await supabase
           .from("jobs")
-          .select("id")
+          .select(
+            "id, customer_id"
+          )
           .eq(
             "id",
             jobId
@@ -346,20 +728,53 @@ export async function POST(
             "business_id",
             businessId
           )
-          .eq(
-            "customer_id",
-            customerId
-          )
           .maybeSingle();
 
       if (
-        jobError ||
-        !job
+        jobError
+      ) {
+        console.error(
+          "Invoice job lookup error:",
+          jobError
+        );
+
+        return NextResponse.json(
+          {
+            success: false,
+            code: "JOB_LOOKUP_ERROR",
+            error:
+              "Unable to verify the selected job.",
+          },
+          {
+            status: 500,
+          }
+        );
+      }
+
+      if (!job) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "JOB_ACCESS_DENIED",
+            error:
+              "The selected job does not belong to your business.",
+          },
+          {
+            status: 403,
+          }
+        );
+      }
+
+      if (
+        job.customer_id !==
+        customerId
       ) {
         return NextResponse.json(
           {
+            success: false,
+            code: "JOB_CUSTOMER_MISMATCH",
             error:
-              "The selected job is not valid for this customer.",
+              "The selected job does not belong to the selected customer.",
           },
           {
             status: 400,
@@ -369,145 +784,132 @@ export async function POST(
     }
 
     /*
-     * --------------------------------------------------
-     * 8. CHECK SUBSCRIPTION LIMIT BEFORE INSERT
-     * --------------------------------------------------
+     * --------------------------------------------------------------
+     * VERIFY QUOTE
+     * --------------------------------------------------------------
+     */
+
+    if (quoteId) {
+      const {
+        data: quote,
+        error: quoteError,
+      } =
+        await supabase
+          .from("quotes")
+          .select(
+            "id, customer_id"
+          )
+          .eq(
+            "id",
+            quoteId
+          )
+          .eq(
+            "business_id",
+            businessId
+          )
+          .maybeSingle();
+
+      if (
+        quoteError
+      ) {
+        console.error(
+          "Invoice quote lookup error:",
+          quoteError
+        );
+
+        return NextResponse.json(
+          {
+            success: false,
+            code: "QUOTE_LOOKUP_ERROR",
+            error:
+              "Unable to verify the selected quote.",
+          },
+          {
+            status: 500,
+          }
+        );
+      }
+
+      if (!quote) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "QUOTE_ACCESS_DENIED",
+            error:
+              "The selected quote does not belong to your business.",
+          },
+          {
+            status: 403,
+          }
+        );
+      }
+
+      if (
+        quote.customer_id !==
+        customerId
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "QUOTE_CUSTOMER_MISMATCH",
+            error:
+              "The selected quote does not belong to the selected customer.",
+          },
+          {
+            status: 400,
+          }
+        );
+      }
+    }
+
+    /*
+     * --------------------------------------------------------------
+     * SERVER-SIDE SUBSCRIPTION CHECK
+     * --------------------------------------------------------------
      *
-     * This is the important part.
+     * This is authoritative.
      *
-     * The previous implementation inserted the invoice
-     * first and checked the limit afterwards.
-     *
-     * That allowed a Free user to exceed the limit.
+     * The browser's earlier subscription check is only for UI.
+     * --------------------------------------------------------------
      */
 
     const access =
-      await canCreateInvoice(
-        user.id,
-        businessId
+      await checkInvoiceAccess(
+        businessId,
+        user.id
       );
 
-    if (!access.allowed) {
+    if (
+      !access.allowed
+    ) {
       return NextResponse.json(
         {
-          error:
-            access.error ||
-            "You have reached the Free plan invoice limit.",
-          code:
-            access.code ||
-            "FREE_LIMIT_REACHED",
+          success: false,
+          allowed: false,
           plan: access.plan,
           limit: access.limit,
           current: access.current,
           remaining:
             access.remaining,
-        },
-        {
-          status: 403,
-        }
-      );
-    }
-
-    /*
-     * --------------------------------------------------
-     * 9. Validate invoice items
-     * --------------------------------------------------
-     */
-
-    const cleanedItems =
-      items.map(
-        (item) => ({
-          description:
-            String(
-              item.description ?? ""
-            ).trim(),
-
-          quantity:
-            Number(
-              item.quantity
-            ),
-
-          unit_price:
-            Number(
-              item.unit_price
-            ),
-        })
-      );
-
-    const hasInvalidItem =
-      cleanedItems.some(
-        (item) =>
-          !item.description ||
-          !Number.isFinite(
-            item.quantity
-          ) ||
-          item.quantity <= 0 ||
-          !Number.isFinite(
-            item.unit_price
-          ) ||
-          item.unit_price < 0
-      );
-
-    if (hasInvalidItem) {
-      return NextResponse.json(
-        {
+          code: access.code,
           error:
-            "Please complete every invoice item. Quantity must be greater than zero and price cannot be negative.",
+            access.error ||
+            "You have reached your invoice limit.",
         },
         {
-          status: 400,
+          status:
+            access.code ===
+            "FREE_LIMIT_REACHED"
+              ? 403
+              : 400,
         }
       );
     }
 
     /*
-     * --------------------------------------------------
-     * 10. Calculate totals on the server
-     * --------------------------------------------------
-     *
-     * Never trust totals sent by the browser.
-     */
-
-    const subtotal =
-      cleanedItems.reduce(
-        (
-          sum,
-          item
-        ) =>
-          sum +
-          item.quantity *
-            item.unit_price,
-        0
-      );
-
-    const taxNumber =
-      Number(tax ?? 0);
-
-    if (
-      !Number.isFinite(
-        taxNumber
-      ) ||
-      taxNumber < 0
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Tax cannot be negative.",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    const total =
-      subtotal +
-      taxNumber;
-
-    /*
-     * --------------------------------------------------
-     * 11. Create invoice
-     * --------------------------------------------------
+     * --------------------------------------------------------------
+     * CREATE INVOICE
+     * --------------------------------------------------------------
      */
 
     const {
@@ -523,20 +925,19 @@ export async function POST(
           customer_id:
             customerId,
 
-          job_id:
-            jobId || null,
-
           quote_id:
-            null,
+            quoteId,
+
+          job_id:
+            jobId,
 
           invoice_number:
-            invoiceNumber.trim(),
+            invoiceNumber,
 
-          title:
-            title.trim(),
+          title,
 
           description:
-            description?.trim() ||
+            description ||
             null,
 
           status:
@@ -544,16 +945,15 @@ export async function POST(
 
           subtotal,
 
-          tax:
-            taxNumber,
+          tax,
 
           total,
 
           due_date:
-            dueDate || null,
+            dueDate,
 
           notes:
-            notes?.trim() ||
+            notes ||
             null,
         })
         .select("id")
@@ -569,9 +969,7 @@ export async function POST(
       );
 
       /*
-       * PostgreSQL unique constraint errors,
-       * such as duplicate invoice numbers,
-       * should be presented more clearly.
+       * Unique invoice number violation.
        */
 
       if (
@@ -580,8 +978,10 @@ export async function POST(
       ) {
         return NextResponse.json(
           {
+            success: false,
+            code: "DUPLICATE_INVOICE_NUMBER",
             error:
-              "That invoice number already exists. Please use a different invoice number.",
+              "That invoice number already exists for this business.",
           },
           {
             status: 409,
@@ -591,6 +991,8 @@ export async function POST(
 
       return NextResponse.json(
         {
+          success: false,
+          code: "INVOICE_CREATION_ERROR",
           error:
             invoiceError?.message ||
             "Unable to create invoice.",
@@ -602,13 +1004,13 @@ export async function POST(
     }
 
     /*
-     * --------------------------------------------------
-     * 12. Create invoice items
-     * --------------------------------------------------
+     * --------------------------------------------------------------
+     * CREATE INVOICE ITEMS
+     * --------------------------------------------------------------
      */
 
-    const invoiceItems =
-      cleanedItems.map(
+    const rows =
+      invoiceItems.map(
         (item) => ({
           invoice_id:
             invoice.id,
@@ -623,8 +1025,7 @@ export async function POST(
             item.unit_price,
 
           amount:
-            item.quantity *
-            item.unit_price,
+            item.amount,
         })
       );
 
@@ -635,31 +1036,50 @@ export async function POST(
         .from(
           "invoice_items"
         )
-        .insert(
-          invoiceItems
-        );
+        .insert(rows);
 
-    if (itemsError) {
+    if (
+      itemsError
+    ) {
       console.error(
         "Invoice items creation error:",
         itemsError
       );
 
       /*
-       * Roll the invoice back if its items
-       * cannot be created.
+       * ------------------------------------------------------------
+       * CLEAN UP ORPHAN INVOICE
+       * ------------------------------------------------------------
        */
 
-      await supabase
-        .from("invoices")
-        .delete()
-        .eq(
-          "id",
-          invoice.id
+      const {
+        error: cleanupError,
+      } =
+        await supabase
+          .from("invoices")
+          .delete()
+          .eq(
+            "id",
+            invoice.id
+          )
+          .eq(
+            "business_id",
+            businessId
+          );
+
+      if (
+        cleanupError
+      ) {
+        console.error(
+          "Invoice cleanup error:",
+          cleanupError
         );
+      }
 
       return NextResponse.json(
         {
+          success: false,
+          code: "INVOICE_ITEMS_CREATION_ERROR",
           error:
             itemsError.message ||
             "Unable to save invoice items.",
@@ -671,18 +1091,77 @@ export async function POST(
     }
 
     /*
-     * --------------------------------------------------
-     * 13. Return success
-     * --------------------------------------------------
+     * --------------------------------------------------------------
+     * SUCCESS
+     * --------------------------------------------------------------
      */
 
     return NextResponse.json(
       {
         success: true,
+
         invoice: {
-          id: invoice.id,
+          id:
+            invoice.id,
+
+          business_id:
+            businessId,
+
+          customer_id:
+            customerId,
+
+          quote_id:
+            quoteId,
+
+          job_id:
+            jobId,
+
+          invoice_number:
+            invoiceNumber,
+
+          title,
+
+          description:
+            description ||
+            null,
+
+          status:
+            "draft",
+
+          subtotal,
+
+          tax,
+
+          total,
+
+          due_date:
+            dueDate,
+
+          notes:
+            notes ||
+            null,
         },
-        access,
+
+        subscription: {
+          plan:
+            access.plan,
+
+          limit:
+            access.limit,
+
+          current:
+            access.current + 1,
+
+          remaining:
+            access.limit ===
+            null
+              ? null
+              : Math.max(
+                  access.limit -
+                    (access.current + 1),
+                  0
+                ),
+        },
       },
       {
         status: 201,
@@ -690,16 +1169,18 @@ export async function POST(
     );
   } catch (error) {
     console.error(
-      "Create invoice API error:",
+      "Invoice API error:",
       error
     );
 
     return NextResponse.json(
       {
+        success: false,
+        code: "INVOICE_API_ERROR",
         error:
           error instanceof Error
             ? error.message
-            : "An unexpected error occurred.",
+            : "Unable to create invoice.",
       },
       {
         status: 500,
