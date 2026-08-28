@@ -1,8 +1,10 @@
-import "server-only";
-
 import { createClient } from "@supabase/supabase-js";
 
-export type Plan = "free" | "professional";
+/*
+|--------------------------------------------------------------------------
+| TYPES
+|--------------------------------------------------------------------------
+*/
 
 export type Feature =
   | "ai_follow_up"
@@ -13,21 +15,49 @@ export type Feature =
   | "quote"
   | "invoice";
 
-export type AccessResult = {
+export type SubscriptionPlan =
+  | "free"
+  | "professional"
+  | "business";
+
+export type AccessCode =
+  | "ALLOWED"
+  | "FREE_LIMIT_REACHED"
+  | "UNAUTHENTICATED"
+  | "INVALID_FEATURE"
+  | "INVALID_BUSINESS"
+  | "BUSINESS_ACCESS_DENIED"
+  | "BUSINESS_LOOKUP_ERROR"
+  | "SUBSCRIPTION_LOOKUP_ERROR"
+  | "SERVER_CONFIGURATION_ERROR";
+
+export interface SubscriptionAccessResult {
   allowed: boolean;
-  plan: Plan;
+  plan: SubscriptionPlan;
   limit: number | null;
   current: number;
   remaining: number | null;
-  code?: string;
+  code: AccessCode;
   error?: string;
-};
+}
+
+/*
+|--------------------------------------------------------------------------
+| FREE PLAN LIMITS
+|--------------------------------------------------------------------------
+|
+| These limits are per business.
+|
+| Professional and Business plans are unlimited for
+| record-based features.
+|
+|--------------------------------------------------------------------------
+*/
 
 const FREE_LIMITS: Record<
-  Exclude<Feature, "ai_assistant">,
-  number | null
+  "customer" | "lead" | "job" | "quote" | "invoice",
+  number
 > = {
-  ai_follow_up: 3,
   customer: 5,
   lead: 5,
   job: 5,
@@ -35,223 +65,116 @@ const FREE_LIMITS: Record<
   invoice: 5,
 };
 
-const PROFESSIONAL_LIMITS: Record<
-  Feature,
-  number | null
-> = {
-  ai_follow_up: null,
-  ai_assistant: null,
-  customer: null,
-  lead: null,
-  job: null,
-  quote: null,
-  invoice: null,
-};
+/*
+|--------------------------------------------------------------------------
+| AI FEATURES
+|--------------------------------------------------------------------------
+|
+| AI features are currently available only to paid plans.
+|
+|--------------------------------------------------------------------------
+*/
+
+const AI_FEATURES: Feature[] = [
+  "ai_follow_up",
+  "ai_assistant",
+];
+
+export const VALID_FEATURES: Feature[] = [
+  "ai_follow_up",
+  "ai_assistant",
+  "customer",
+  "lead",
+  "job",
+  "quote",
+  "invoice",
+];
+
+/*
+|--------------------------------------------------------------------------
+| SERVER SUPABASE CLIENT
+|--------------------------------------------------------------------------
+*/
 
 function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL;
+
   const serviceRoleKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  if (!url || !serviceRoleKey) {
+  if (!supabaseUrl || !serviceRoleKey) {
     throw new Error(
       "Supabase server configuration is missing."
     );
   }
 
-  return createClient(url, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
-}
-
-function isProfessionalStatus(
-  plan: unknown,
-  status: unknown
-): boolean {
-  return (
-    plan === "professional" &&
-    (status === "active" ||
-      status === "trialing")
+  return createClient(
+    supabaseUrl,
+    serviceRoleKey,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    }
   );
 }
 
-export async function getUserPlan(
-  userId: string
-): Promise<Plan> {
-  const supabase = getSupabaseAdmin();
+/*
+|--------------------------------------------------------------------------
+| NORMALISE PLAN
+|--------------------------------------------------------------------------
+*/
 
-  const { data, error } = await supabase
-    .from("subscriptions")
-    .select(
-      `
-        plan,
-        status,
-        current_period_end
-      `
-    )
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error) {
-    console.error(
-      "Subscription lookup error:",
-      error
-    );
-
-    throw new Error(
-      "Unable to verify your subscription."
-    );
-  }
-
+function normalisePlan(
+  value: unknown
+): SubscriptionPlan {
   if (
-    data &&
-    isProfessionalStatus(
-      data.plan,
-      data.status
-    )
+    value === "professional" ||
+    value === "business"
   ) {
-    return "professional";
+    return value;
   }
 
   return "free";
 }
 
-function getMonthStart(): string {
-  const now = new Date();
+/*
+|--------------------------------------------------------------------------
+| DETERMINE WHETHER SUBSCRIPTION IS ACTIVE
+|--------------------------------------------------------------------------
+|
+| active:
+|   Fully active subscription.
+|
+| trialing:
+|   Subscription is in a trial and should have paid-plan access.
+|
+| past_due:
+|   We deliberately keep access while Stripe retries payment.
+|
+| canceled / unpaid / incomplete / incomplete_expired:
+|   No paid access.
+|
+|--------------------------------------------------------------------------
+*/
 
-  return new Date(
-    Date.UTC(
-      now.getUTCFullYear(),
-      now.getUTCMonth(),
-      1,
-      0,
-      0,
-      0,
-      0
-    )
-  ).toISOString();
+function hasPaidSubscriptionAccess(
+  status: string | null | undefined
+) {
+  return (
+    status === "active" ||
+    status === "trialing" ||
+    status === "past_due"
+  );
 }
 
-async function getAiUsageCount(
-  userId: string,
-  usageType: string
-): Promise<number> {
-  const supabase = getSupabaseAdmin();
-
-  const monthStart = getMonthStart();
-
-  const { count, error } = await supabase
-    .from("ai_usage")
-    .select("*", {
-      count: "exact",
-      head: true,
-    })
-    .eq("user_id", userId)
-    .eq("usage_type", usageType)
-    .gte("created_at", monthStart);
-
-  if (error) {
-    console.error(
-      "AI usage lookup error:",
-      error
-    );
-
-    throw new Error(
-      "Unable to check AI usage."
-    );
-  }
-
-  return count ?? 0;
-}
-
-async function getRecordCount(
-  userId: string,
-  table: string,
-  businessId?: string
-): Promise<number> {
-  const supabase = getSupabaseAdmin();
-
-  let query = supabase
-    .from(table)
-    .select("*", {
-      count: "exact",
-      head: true,
-    });
-
-  /*
-   * Records in FlowPilot are normally associated
-   * with a business.
-   *
-   * Prefer business-level counting whenever
-   * businessId is available.
-   */
-  if (businessId) {
-    query = query.eq(
-      "business_id",
-      businessId
-    );
-  }
-
-  /*
-   * The userId argument is intentionally retained
-   * because the access system is user-based.
-   *
-   * Business ownership is verified by the API
-   * route before this function is called.
-   */
-
-  const { count, error } =
-    await query;
-
-  if (error) {
-    console.error(
-      `${table} count error:`,
-      error
-    );
-
-    throw new Error(
-      `Unable to check ${table} usage.`
-    );
-  }
-
-  return count ?? 0;
-}
-
-function getLimitMessage(
-  feature: Feature,
-  limit: number
-): string {
-  const names: Record<
-    Feature,
-    string
-  > = {
-    ai_follow_up:
-      "AI follow-ups",
-
-    ai_assistant:
-      "AI Assistant",
-
-    customer:
-      "customers",
-
-    lead:
-      "leads",
-
-    job:
-      "jobs",
-
-    quote:
-      "quotes",
-
-    invoice:
-      "invoices",
-  };
-
-  return `You have reached the Free plan limit of ${limit} ${names[feature]}. Upgrade to Professional for unlimited ${names[feature]}.`;
-}
+/*
+|--------------------------------------------------------------------------
+| CHECK FEATURE ACCESS
+|--------------------------------------------------------------------------
+*/
 
 export async function checkFeatureAccess(
   userId: string,
@@ -259,116 +182,437 @@ export async function checkFeatureAccess(
   options?: {
     businessId?: string;
   }
-): Promise<AccessResult> {
-  const plan =
-    await getUserPlan(userId);
+): Promise<SubscriptionAccessResult> {
+  /*
+   * --------------------------------------------------------------
+   * BASIC VALIDATION
+   * --------------------------------------------------------------
+   */
+
+  if (
+    !userId ||
+    typeof userId !== "string"
+  ) {
+    return {
+      allowed: false,
+      plan: "free",
+      limit: null,
+      current: 0,
+      remaining: null,
+      code: "UNAUTHENTICATED",
+      error:
+        "You must be signed in to continue.",
+    };
+  }
+
+  const validFeatures: Feature[] = [
+    "ai_follow_up",
+    "ai_assistant",
+    "customer",
+    "lead",
+    "job",
+    "quote",
+    "invoice",
+  ];
+
+  if (!validFeatures.includes(feature)) {
+    return {
+      allowed: false,
+      plan: "free",
+      limit: null,
+      current: 0,
+      remaining: null,
+      code: "INVALID_FEATURE",
+      error:
+        "Invalid subscription feature.",
+    };
+  }
 
   /*
-   * Professional users have unlimited access.
+   * --------------------------------------------------------------
+   * BUSINESS VALIDATION
+   * --------------------------------------------------------------
+   *
+   * Record-based features require a business ID.
+   *
+   * AI features do not require a business ID here because
+   * their access is determined from the user's subscription.
+   * --------------------------------------------------------------
    */
-  if (plan === "professional") {
+
+  const requiresBusiness =
+    !AI_FEATURES.includes(feature);
+
+  if (
+    requiresBusiness &&
+    (
+      !options?.businessId ||
+      typeof options.businessId !== "string"
+    )
+  ) {
+    return {
+      allowed: false,
+      plan: "free",
+      limit: null,
+      current: 0,
+      remaining: null,
+      code: "INVALID_BUSINESS",
+      error:
+        "Business information is required.",
+    };
+  }
+
+  /*
+   * --------------------------------------------------------------
+   * SUPABASE
+   * --------------------------------------------------------------
+   */
+
+  let supabase;
+
+  try {
+    supabase = getSupabaseAdmin();
+  } catch (error) {
+    console.error(
+      "Subscription Supabase configuration error:",
+      error
+    );
+
+    return {
+      allowed: false,
+      plan: "free",
+      limit: null,
+      current: 0,
+      remaining: null,
+      code: "SERVER_CONFIGURATION_ERROR",
+      error:
+        "Subscription service is not configured correctly.",
+    };
+  }
+
+  /*
+   * --------------------------------------------------------------
+   * BUSINESS OWNERSHIP
+   * --------------------------------------------------------------
+   *
+   * Never trust a business ID supplied by the browser.
+   * Verify that it belongs to the authenticated user.
+   * --------------------------------------------------------------
+   */
+
+  if (
+    requiresBusiness &&
+    options?.businessId
+  ) {
+    const {
+      data: business,
+      error: businessError,
+    } = await supabase
+      .from("businesses")
+      .select("id")
+      .eq(
+        "id",
+        options.businessId
+      )
+      .eq(
+        "owner_id",
+        userId
+      )
+      .maybeSingle();
+
+    if (businessError) {
+      console.error(
+        "Business ownership lookup error:",
+        businessError
+      );
+
+      return {
+        allowed: false,
+        plan: "free",
+        limit: null,
+        current: 0,
+        remaining: null,
+        code: "BUSINESS_LOOKUP_ERROR",
+        error:
+          "Unable to verify your business.",
+      };
+    }
+
+    if (!business) {
+      return {
+        allowed: false,
+        plan: "free",
+        limit: null,
+        current: 0,
+        remaining: null,
+        code: "BUSINESS_ACCESS_DENIED",
+        error:
+          "You do not have access to this business.",
+      };
+    }
+  }
+
+  /*
+   * --------------------------------------------------------------
+   * SUBSCRIPTION
+   * --------------------------------------------------------------
+   */
+
+  const {
+    data: subscription,
+    error: subscriptionError,
+  } = await supabase
+    .from("subscriptions")
+    .select(
+      `
+        plan,
+        status,
+        current_period_end,
+        cancel_at_period_end
+      `
+    )
+    .eq(
+      "user_id",
+      userId
+    )
+    .maybeSingle();
+
+  if (subscriptionError) {
+    console.error(
+      "Subscription lookup error:",
+      subscriptionError
+    );
+
+    return {
+      allowed: false,
+      plan: "free",
+      limit: null,
+      current: 0,
+      remaining: null,
+      code: "SUBSCRIPTION_LOOKUP_ERROR",
+      error:
+        "Unable to verify your subscription.",
+    };
+  }
+
+  /*
+   * --------------------------------------------------------------
+   * DETERMINE PLAN
+   * --------------------------------------------------------------
+   */
+
+  const paidSubscription =
+    subscription &&
+    hasPaidSubscriptionAccess(
+      subscription.status
+    );
+
+  const plan: SubscriptionPlan =
+    paidSubscription
+      ? normalisePlan(
+          subscription.plan
+        )
+      : "free";
+
+  /*
+   * --------------------------------------------------------------
+   * PAID PLANS
+   * --------------------------------------------------------------
+   *
+   * Professional and Business users have unlimited access
+   * to record-based and AI features.
+   * --------------------------------------------------------------
+   */
+
+  if (
+    plan === "professional" ||
+    plan === "business"
+  ) {
     return {
       allowed: true,
       plan,
-      limit:
-        PROFESSIONAL_LIMITS[feature],
+      limit: null,
       current: 0,
       remaining: null,
+      code: "ALLOWED",
     };
   }
 
   /*
-   * AI Assistant is Professional-only.
+   * --------------------------------------------------------------
+   * AI FEATURES ON FREE PLAN
+   * --------------------------------------------------------------
    */
-  if (feature === "ai_assistant") {
-    return {
-      allowed: false,
-      plan,
-      limit: 0,
-      current: 0,
-      remaining: 0,
-      code: "PROFESSIONAL_REQUIRED",
-      error:
-        "The AI Assistant is available on the Professional plan. Upgrade to unlock it.",
-    };
-  }
-
-  let current = 0;
-
-  if (feature === "ai_follow_up") {
-    current =
-      await getAiUsageCount(
-        userId,
-        "quote_follow_up"
-      );
-  } else {
-    const tableMap: Record<
-      Exclude<
-        Feature,
-        | "ai_follow_up"
-        | "ai_assistant"
-      >,
-      string
-    > = {
-      customer: "customers",
-      lead: "leads",
-      job: "jobs",
-      quote: "quotes",
-      invoice: "invoices",
-    };
-
-    current =
-      await getRecordCount(
-        userId,
-        tableMap[feature],
-        options?.businessId
-      );
-  }
-
-  const limit =
-    FREE_LIMITS[feature];
 
   if (
-    limit !== null &&
+    AI_FEATURES.includes(feature)
+  ) {
+    return {
+      allowed: false,
+      plan: "free",
+      limit: null,
+      current: 0,
+      remaining: null,
+      code: "FREE_LIMIT_REACHED",
+      error:
+        "This AI feature requires a Professional or Business subscription.",
+    };
+  }
+
+  /*
+   * --------------------------------------------------------------
+   * FREE RECORD LIMIT
+   * --------------------------------------------------------------
+   */
+
+  const limit =
+    FREE_LIMITS[
+      feature as
+        | "customer"
+        | "lead"
+        | "job"
+        | "quote"
+        | "invoice"
+    ];
+
+  if (!options?.businessId) {
+    return {
+      allowed: false,
+      plan: "free",
+      limit,
+      current: 0,
+      remaining: 0,
+      code: "INVALID_BUSINESS",
+      error:
+        "Business information is required.",
+    };
+  }
+
+  /*
+   * --------------------------------------------------------------
+   * TABLE MAPPING
+   * --------------------------------------------------------------
+   */
+
+  const tableMap: Record<
+    "customer" | "lead" | "job" | "quote" | "invoice",
+    string
+  > = {
+    customer: "customers",
+    lead: "leads",
+    job: "jobs",
+    quote: "quotes",
+    invoice: "invoices",
+  };
+
+  const table =
+    tableMap[
+      feature as
+        | "customer"
+        | "lead"
+        | "job"
+        | "quote"
+        | "invoice"
+    ];
+
+  /*
+   * --------------------------------------------------------------
+   * COUNT CURRENT RECORDS
+   * --------------------------------------------------------------
+   */
+
+  const {
+    count,
+    error: countError,
+  } = await supabase
+    .from(table)
+    .select(
+      "id",
+      {
+        count: "exact",
+        head: true,
+      }
+    )
+    .eq(
+      "business_id",
+      options.businessId
+    );
+
+  if (countError) {
+    console.error(
+      `Unable to count ${feature} records:`,
+      countError
+    );
+
+    return {
+      allowed: false,
+      plan: "free",
+      limit,
+      current: 0,
+      remaining: null,
+      code: "SUBSCRIPTION_LOOKUP_ERROR",
+      error:
+        `Unable to verify your ${feature} limit.`,
+    };
+  }
+
+  const current =
+    count ?? 0;
+
+  const remaining =
+    Math.max(
+      limit - current,
+      0
+    );
+
+  /*
+   * --------------------------------------------------------------
+   * LIMIT REACHED
+   * --------------------------------------------------------------
+   */
+
+  if (
     current >= limit
   ) {
     return {
       allowed: false,
-      plan,
+      plan: "free",
       limit,
       current,
       remaining: 0,
       code: "FREE_LIMIT_REACHED",
-      error: getLimitMessage(
-        feature,
-        limit
-      ),
+      error:
+        `You have reached the Free plan limit of ${limit} ${feature}s. Upgrade to Professional for unlimited ${feature}s.`,
     };
   }
 
+  /*
+   * --------------------------------------------------------------
+   * ACCESS GRANTED
+   * --------------------------------------------------------------
+   */
+
   return {
     allowed: true,
-    plan,
+    plan: "free",
     limit,
     current,
-    remaining:
-      limit === null
-        ? null
-        : Math.max(
-            0,
-            limit - current
-          ),
+    remaining,
+    code: "ALLOWED",
   };
 }
 
-export async function canUseAiFollowUp(
-  userId: string
-) {
-  return checkFeatureAccess(
-    userId,
-    "ai_follow_up"
-  );
-}
+/*
+|--------------------------------------------------------------------------
+| AI ASSISTANT ACCESS
+|--------------------------------------------------------------------------
+|
+| Compatibility helper used by:
+|
+| app/api/ai-assistant/route.ts
+|
+|--------------------------------------------------------------------------
+*/
 
 export async function canUseAiAssistant(
   userId: string
@@ -379,84 +623,110 @@ export async function canUseAiAssistant(
   );
 }
 
-export async function canCreateCustomer(
-  userId: string,
-  businessId?: string
+/*
+|--------------------------------------------------------------------------
+| AI FOLLOW-UP ACCESS
+|--------------------------------------------------------------------------
+|
+| Compatibility helper used by:
+|
+| app/api/ai-follow-up/route.ts
+|
+|--------------------------------------------------------------------------
+*/
+
+export async function canUseAiFollowUp(
+  userId: string
 ) {
   return checkFeatureAccess(
     userId,
-    "customer",
-    { businessId }
+    "ai_follow_up"
   );
 }
 
-export async function canCreateLead(
+/*
+|--------------------------------------------------------------------------
+| RECORD AI USAGE
+|--------------------------------------------------------------------------
+|
+| This helper is intentionally defensive.
+|
+| The AI routes may call this after a successful AI request.
+| If an ai_usage table exists, usage is recorded there.
+|
+| IMPORTANT:
+| Usage recording must never turn a successful AI response
+| into a failed request if the usage table is unavailable.
+|
+|--------------------------------------------------------------------------
+*/
+
+export async function recordAiUsage(
   userId: string,
-  businessId?: string
+  feature:
+    | "ai_follow_up"
+    | "ai_assistant"
+    | "quote_follow_up" = "ai_follow_up"
 ) {
-  return checkFeatureAccess(
-    userId,
-    "lead",
-    { businessId }
-  );
+  try {
+    const supabase =
+      getSupabaseAdmin();
+
+    const {
+      error,
+    } = await supabase
+      .from("ai_usage")
+      .insert({
+        user_id: userId,
+        feature,
+      });
+
+    if (error) {
+      console.error(
+        "AI usage recording error:",
+        error
+      );
+
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+
+    return {
+      success: true,
+    };
+  } catch (error) {
+    console.error(
+      "AI usage recording failed:",
+      error
+    );
+
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unable to record AI usage.",
+    };
+  }
 }
 
-export async function canCreateJob(
-  userId: string,
-  businessId?: string
-) {
-  return checkFeatureAccess(
-    userId,
-    "job",
-    { businessId }
-  );
-}
+/*
+|--------------------------------------------------------------------------
+| INVOICE ACCESS HELPER
+|--------------------------------------------------------------------------
+*/
 
-export async function canCreateQuote(
-  userId: string,
-  businessId?: string
-) {
-  return checkFeatureAccess(
-    userId,
-    "quote",
-    { businessId }
-  );
-}
-
-export async function canCreateInvoice(
-  userId: string,
-  businessId?: string
+export async function checkInvoiceAccess(
+  businessId: string,
+  userId: string
 ) {
   return checkFeatureAccess(
     userId,
     "invoice",
-    { businessId }
+    {
+      businessId,
+    }
   );
-}
-
-export async function recordAiUsage(
-  userId: string,
-  usageType: string
-): Promise<void> {
-  const supabase =
-    getSupabaseAdmin();
-
-  const { error } =
-    await supabase
-      .from("ai_usage")
-      .insert({
-        user_id: userId,
-        usage_type: usageType,
-      });
-
-  if (error) {
-    console.error(
-      "AI usage record error:",
-      error
-    );
-
-    throw new Error(
-      "Unable to record AI usage."
-    );
-  }
 }
