@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTheme } from "next-themes";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -72,6 +73,13 @@ type QuoteFollowUp = {
 
 export default function DashboardPage() {
   const router = useRouter();
+  
+    const { theme, setTheme } = useTheme();
+
+  const ADMIN_USER_ID =
+    "dac45085-4903-4db1-bd77-e299997c0dc1";
+
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const [email, setEmail] = useState("");
   const [business, setBusiness] = useState<Business | null>(null);
@@ -134,6 +142,7 @@ export default function DashboardPage() {
       }
 
       setEmail(user.email ?? "");
+	  setIsAdmin(user.id === ADMIN_USER_ID);
 
       // ----------------------------------------
       // LOAD BUSINESS
@@ -902,7 +911,7 @@ if (followUpError) {
               .
             </p>
           </div>
-
+		 
           <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
 
             <div className="rounded-lg border border-white/10 bg-slate-900 px-4 py-3">
@@ -991,26 +1000,33 @@ if (followUpError) {
 </p>
     </div>
 
-    {subscription?.plan === "professional" &&
-    subscription.status === "active" ? (
-     <button
-  type="button"
-  onClick={handleManageSubscription}
-  disabled={openingPortal}
-  className="inline-flex shrink-0 rounded-lg border border-blue-500/30 bg-blue-500/10 px-5 py-3 text-sm font-semibold text-blue-300 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
->
-  {openingPortal
-    ? "Opening billing..."
-    : "Manage subscription →"}
-</button>
-    ) : (
-      <Link
-        href="/pricing"
-        className="inline-flex shrink-0 rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold transition hover:bg-blue-500"
-      >
-        Upgrade to Professional →
-      </Link>
-    )}
+    
+{isAdmin ? (
+  subscription?.plan === "professional" &&
+  subscription.status === "active" ? (
+    <button
+      type="button"
+      onClick={handleManageSubscription}
+      disabled={openingPortal}
+      className="inline-flex shrink-0 rounded-lg border border-blue-500/30 bg-blue-500/10 px-5 py-3 text-sm font-semibold text-blue-300 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {openingPortal
+        ? "Opening billing..."
+        : "Manage subscription →"}
+    </button>
+  ) : (
+    <Link
+      href="/pricing"
+      className="inline-flex shrink-0 rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold transition hover:bg-blue-500"
+    >
+      Upgrade to Professional →
+    </Link>
+  )
+) : (
+  <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-5 py-3 text-sm font-semibold text-emerald-300">
+    Free Mode
+  </div>
+)}
 
   </div>
 

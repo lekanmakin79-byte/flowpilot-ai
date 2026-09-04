@@ -17,43 +17,40 @@ import FoundingMembers from "@/components/landing/FoundingMembers";
 import WhoWeServe from "@/components/landing/WhoWeServe";
 import TrustBar from "@/components/landing/TrustBar";
 
+export default function Home() {
+  return (
+    <main>
+      <Navbar />
 
-export default function Home(){
+      <Hero />
 
-return (
-<main>
+      <Problems />
 
- <Navbar/>
+      <Solution />
 
-<Hero/>
+      <Comparison />
 
-<Problems/>
+      <HowItWorks />
 
-<Solution/>
+      <Features />
 
-<Comparison/>
+      <WhyChoose />
 
-<HowItWorks/>
+      <WhoWeServe />
 
-<Features/>
+      <FoundingMembers />
 
-<WhyChoose />
+      <FAQ />
 
-<WhoWeServe />
+      <Waitlist />
 
-<FoundingMembers />
+      <TrustBar />
 
-<FAQ/>
+      <Footer />
 
-<Waitlist/>
+      <BackToTop />
 
-<TrustBar />
-
-<Footer/>
-
-<BackToTop/>
-
-</main>
-)
-
+      <Analytics />
+    </main>
+  );
 }

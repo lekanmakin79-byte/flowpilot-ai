@@ -3,7 +3,7 @@ import "./globals.css";
 import { Analytics } from "@vercel/analytics/react";
 import GoogleAnalytics from "@/components/GoogleAnalytics";
 import MicrosoftClarity from "@/components/MicrosoftClarity";
-
+import ThemeProvider from "@/components/ThemeProvider";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://flowpilot-ai-orcin.vercel.app"),
@@ -16,7 +16,7 @@ export const metadata: Metadata = {
   description:
     "FlowPilot AI helps electricians, plumbers, builders, cleaning companies, property services and other small businesses manage quotes, customers, jobs and invoices with AI.",
 
-verification: {
+  verification: {
     google: "ULRHqhMw_NJN_qgQ39FT77fzv0vefBdyaOrgETP4JSU",
   },
 
@@ -45,15 +45,10 @@ verification: {
 
   openGraph: {
     title: "FlowPilot AI",
-    description:
-      "The AI Office Manager for Small Businesses.",
-
+    description: "The AI Office Manager for Small Businesses.",
     url: "https://flowpilot-ai-orcin.vercel.app",
-
     siteName: "FlowPilot AI",
-
     locale: "en_GB",
-
     type: "website",
 
     images: [
@@ -69,8 +64,7 @@ verification: {
   twitter: {
     card: "summary_large_image",
     title: "FlowPilot AI",
-    description:
-      "The AI Office Manager for Small Businesses.",
+    description: "The AI Office Manager for Small Businesses.",
     images: ["/og-image.png"],
   },
 
@@ -78,59 +72,56 @@ verification: {
     index: true,
     follow: true,
   },
-  
 };
-
 
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-	const structuredData = {
-  "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  name: "FlowPilot AI",
-  applicationCategory: "BusinessApplication",
-  operatingSystem: "Web Browser",
-  description:
-    "AI Office Manager for small businesses. Manage customers, quotes, jobs and invoices with AI.",
-  url: "https://flowpilot-ai-orcin.vercel.app",
-  image: "https://flowpilot-ai-orcin.vercel.app/og-image.png",
-  offers: {
-    "@type": "Offer",
-    price: "0",
-    priceCurrency: "GBP",
-  },
-  creator: {
-    "@type": "Organization",
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
     name: "FlowPilot AI",
-  },
-};
+    applicationCategory: "BusinessApplication",
+    operatingSystem: "Web Browser",
+    description:
+      "AI Office Manager for small businesses. Manage customers, quotes, jobs and invoices with AI.",
+    url: "https://flowpilot-ai-orcin.vercel.app",
+    image: "https://flowpilot-ai-orcin.vercel.app/og-image.png",
+
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "GBP",
+    },
+
+    creator: {
+      "@type": "Organization",
+      name: "FlowPilot AI",
+    },
+  };
 
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <body>
+        <ThemeProvider>
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{
+              __html: JSON.stringify(structuredData),
+            }}
+          />
 
-     <body>
-	 
-	 <script
-  type="application/ld+json"
-  dangerouslySetInnerHTML={{
-    __html: JSON.stringify(structuredData),
-  }}
-/>
+          {children}
 
-{children}
+          <Analytics />
 
-<Analytics />
+          <GoogleAnalytics />
 
-  <GoogleAnalytics />
-  
-  <MicrosoftClarity />
-
-</body>
-
+          <MicrosoftClarity />
+        </ThemeProvider>
+      </body>
     </html>
   );
-
 }

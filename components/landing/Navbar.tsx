@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 
 export default function Navbar() {
@@ -15,20 +14,13 @@ export default function Navbar() {
     <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white shadow-sm">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 md:px-8">
 
-        {/* Logo */}
+        {/* Text Logo */}
         <Link
           href="/"
           onClick={closeMenu}
-          className="flex items-center"
+          className="text-2xl font-bold text-green-600"
         >
-          <Image
-            src="/logo.png"
-            width={150}
-            height={150}
-            alt="FlowPilot AI"
-            className="h-auto w-[135px] sm:w-[150px]"
-            priority
-          />
+          ✦ FlowPilot AI
         </Link>
 
         {/* Desktop Menu */}
@@ -118,118 +110,117 @@ export default function Navbar() {
       </div>
 
       {/* Mobile Menu */}
-{open && (
-  <div className="fixed inset-x-0 top-[73px] bottom-0 z-40 overflow-y-auto border-t border-slate-200 bg-white shadow-2xl md:hidden">
-    <div className="mx-auto max-w-7xl px-5 py-5 pb-10">
+      {open && (
+        <div className="fixed inset-x-0 top-[73px] bottom-0 z-40 overflow-y-auto border-t border-slate-200 bg-white shadow-2xl md:hidden">
+          <div className="mx-auto max-w-7xl px-5 py-5 pb-10">
 
-      {/* Account Actions */}
-      <div className="mb-5 rounded-2xl border border-green-100 bg-green-50 p-4">
-        <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">
-          Account
-        </p>
+            {/* Account Actions */}
+            <div className="mb-5 rounded-2xl border border-green-100 bg-green-50 p-4">
+              <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">
+                Account
+              </p>
 
-        <div className="grid grid-cols-2 gap-3">
-          <Link
-            href="/login"
-            onClick={closeMenu}
-            className="flex min-h-[52px] items-center justify-center rounded-xl border-2 border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-[0.98]"
-          >
-            Log In
-          </Link>
+              <div className="grid grid-cols-2 gap-3">
+                <Link
+                  href="/login"
+                  onClick={closeMenu}
+                  className="flex min-h-[52px] items-center justify-center rounded-xl border-2 border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 active:scale-[0.98]"
+                >
+                  Log In
+                </Link>
 
-          <Link
-            href="/signup"
-            onClick={closeMenu}
-            className="flex min-h-[52px] items-center justify-center rounded-xl bg-green-500 px-4 py-3 text-sm font-bold text-white shadow-md transition hover:bg-green-600 active:scale-[0.98]"
-          >
-            Start Free
-          </Link>
+                <Link
+                  href="/signup"
+                  onClick={closeMenu}
+                  className="flex min-h-[52px] items-center justify-center rounded-xl bg-green-500 px-4 py-3 text-sm font-bold text-white shadow-md transition hover:bg-green-600 active:scale-[0.98]"
+                >
+                  Start Free
+                </Link>
+              </div>
+            </div>
+
+            {/* Main Navigation */}
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+
+              <a
+                href="/#features"
+                onClick={closeMenu}
+                className="flex min-h-[52px] items-center gap-3 border-b border-slate-200 px-5 py-4 font-medium text-slate-700 transition hover:bg-white hover:text-green-600"
+              >
+                <span className="text-lg">🚀</span>
+                <span>Features</span>
+              </a>
+
+              <a
+                href="/#how-it-works"
+                onClick={closeMenu}
+                className="flex min-h-[52px] items-center gap-3 border-b border-slate-200 px-5 py-4 font-medium text-slate-700 transition hover:bg-white hover:text-green-600"
+              >
+                <span className="text-lg">⚙️</span>
+                <span>How It Works</span>
+              </a>
+
+              <a
+                href="/#pricing"
+                onClick={closeMenu}
+                className="flex min-h-[52px] items-center gap-3 border-b border-slate-200 px-5 py-4 font-medium text-slate-700 transition hover:bg-white hover:text-green-600"
+              >
+                <span className="text-lg">💷</span>
+                <span>Pricing</span>
+              </a>
+
+              <Link
+                href="/roadmap"
+                onClick={closeMenu}
+                className="flex min-h-[52px] items-center gap-3 border-b border-slate-200 px-5 py-4 font-medium text-slate-700 transition hover:bg-white hover:text-green-600"
+              >
+                <span className="text-lg">🗺️</span>
+                <span>Roadmap</span>
+              </Link>
+
+              <Link
+                href="/about"
+                onClick={closeMenu}
+                className="flex min-h-[52px] items-center gap-3 border-b border-slate-200 px-5 py-4 font-medium text-slate-700 transition hover:bg-white hover:text-green-600"
+              >
+                <span className="text-lg">ℹ️</span>
+                <span>About</span>
+              </Link>
+
+              <Link
+                href="/contact"
+                onClick={closeMenu}
+                className="flex min-h-[52px] items-center gap-3 px-5 py-4 font-medium text-slate-700 transition hover:bg-white hover:text-green-600"
+              >
+                <span className="text-lg">✉️</span>
+                <span>Contact</span>
+              </Link>
+            </div>
+
+            {/* Secondary Links */}
+            <div className="mt-5 flex items-center justify-center gap-5 pb-4 text-xs text-slate-400">
+              <Link
+                href="/privacy"
+                onClick={closeMenu}
+                className="transition hover:text-slate-600"
+              >
+                Privacy
+              </Link>
+
+              <span>•</span>
+
+              <Link
+                href="/terms"
+                onClick={closeMenu}
+                className="transition hover:text-slate-600"
+              >
+                Terms
+              </Link>
+            </div>
+
+          </div>
         </div>
-      </div>
-
-      {/* Main Navigation */}
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
-
-        <a
-          href="/#features"
-          onClick={closeMenu}
-          className="flex min-h-[52px] items-center gap-3 border-b border-slate-200 px-5 py-4 font-medium text-slate-700 transition hover:bg-white hover:text-green-600"
-        >
-          <span className="text-lg">🚀</span>
-          <span>Features</span>
-        </a>
-
-        <a
-          href="/#how-it-works"
-          onClick={closeMenu}
-          className="flex min-h-[52px] items-center gap-3 border-b border-slate-200 px-5 py-4 font-medium text-slate-700 transition hover:bg-white hover:text-green-600"
-        >
-          <span className="text-lg">⚙️</span>
-          <span>How It Works</span>
-        </a>
-
-        <a
-          href="/#pricing"
-          onClick={closeMenu}
-          className="flex min-h-[52px] items-center gap-3 border-b border-slate-200 px-5 py-4 font-medium text-slate-700 transition hover:bg-white hover:text-green-600"
-        >
-          <span className="text-lg">💷</span>
-          <span>Pricing</span>
-        </a>
-
-        <Link
-          href="/roadmap"
-          onClick={closeMenu}
-          className="flex min-h-[52px] items-center gap-3 border-b border-slate-200 px-5 py-4 font-medium text-slate-700 transition hover:bg-white hover:text-green-600"
-        >
-          <span className="text-lg">🗺️</span>
-          <span>Roadmap</span>
-        </Link>
-
-        <Link
-          href="/about"
-          onClick={closeMenu}
-          className="flex min-h-[52px] items-center gap-3 border-b border-slate-200 px-5 py-4 font-medium text-slate-700 transition hover:bg-white hover:text-green-600"
-        >
-          <span className="text-lg">ℹ️</span>
-          <span>About</span>
-        </Link>
-
-        <Link
-          href="/contact"
-          onClick={closeMenu}
-          className="flex min-h-[52px] items-center gap-3 px-5 py-4 font-medium text-slate-700 transition hover:bg-white hover:text-green-600"
-        >
-          <span className="text-lg">✉️</span>
-          <span>Contact</span>
-        </Link>
-      </div>
-
-      {/* Secondary Links */}
-      <div className="mt-5 flex items-center justify-center gap-5 pb-4 text-xs text-slate-400">
-        <Link
-          href="/privacy"
-          onClick={closeMenu}
-          className="transition hover:text-slate-600"
-        >
-          Privacy
-        </Link>
-
-        <span>•</span>
-
-        <Link
-          href="/terms"
-          onClick={closeMenu}
-          className="transition hover:text-slate-600"
-        >
-          Terms
-        </Link>
-      </div>
-
-    </div>
-  </div>
-)}
+      )}
     </nav>
   );
 }
-
